@@ -1,0 +1,23 @@
+{
+  "$comment": "Why each file in system_prompts/ differs from Google's original in stock/ (agy v1.5.7). Every changed file needs an entry; unchanged files need none. An empty file drops its section. Rationale and measurements: references/system-prompt.md.",
+  "templates": {
+    "artifacts.tmpl": {
+      "reason": "Web-UI artifact formatting; pushes reports into files instead of chat."
+    },
+    "communication_style.tmpl": {
+      "reason": "Drops 'Be concise' truncation bias and redundant clarification rule; keeps markdown, links, and hub branches."
+    },
+    "conversation_transcript.tmpl": {
+      "reason": "Same guidance in a fifth of the tokens; reads logs only when compaction summary omits needed detail."
+    },
+    "guidelines.tmpl": {
+      "reason": "Drops the section: the sandbox-bypass and CAPTCHA lectures, and with them the whole list, since v1.5.7's generic-system-prompt experiment (on by default) already drops comment preservation."
+    },
+    "skills.tmpl": {
+      "reason": "Drops the SKILL.md anatomy lecture and the two stock guides (agy-customizations, antigravity-guide); keeps the swarm skills, which pair with the swarm tool; omits the section when no other skill exists."
+    },
+    "slash_commands.tmpl": {
+      "reason": "Asks the model to promote slash commands it cannot run."
+    }
+  }
+}
