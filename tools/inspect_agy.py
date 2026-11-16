@@ -24,7 +24,7 @@ MH_MAGIC_64 = 0xFEEDFACF
 LC_SEGMENT_64 = 0x19
 GOPCLN_MAGIC_120 = 0xFFFFFFF1
 DEFAULT_BINARY = pathlib.Path.home() / ".local/bin/agy"
-CACHE_DIR = pathlib.Path(__file__).resolve().parent / ".cache"
+CACHE_DIR = pathlib.Path(__file__).resolve().parent.parent / ".cache"
 
 
 class Section(NamedTuple):

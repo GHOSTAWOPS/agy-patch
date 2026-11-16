@@ -1,6 +1,6 @@
 # `agy` CLI System Prompt: How It Is Built and How to Change It
 
-Findings behind [`templates/`](../templates/). Per-version data lives there: `templates/v<ver>/stock/` is everything Google ships for a release (the rendered prompt in `PROMPT.md`, tool schemas, all 16 template sources), and `templates/v<ver>/README.md` maps each section to its source, status and size. Verified against `agy v1.5.3` with [`capture_prompt.py`](../capture_prompt.py).
+Findings behind [`templates/`](../../templates/). Per-version data lives there: `templates/v<ver>/stock/` is everything Google ships for a release (the rendered prompt in `PROMPT.md`, tool schemas, all 16 template sources), and `templates/v<ver>/README.md` maps each section to its source, status and size. Verified against `agy v1.5.3` with [`capture_prompt.py`](../../tools/capture_prompt.py).
 
 ## 1. Assembly
 

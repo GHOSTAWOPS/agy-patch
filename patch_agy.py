@@ -6,7 +6,7 @@ anchors each site via invariant preceding instruction sequences, and computes PC
 ARM64 `bl` displacements automatically across versions.
 
 Prompt templates: writes every file in templates/v<version>/system_prompts/ that differs
-from Google's original in stock/, for the version the binary reports (prompt_templates.py).
+from Google's original in stock/, for the version the binary reports (tools/prompt_templates.py).
 
 Every --apply rebuilds from the clean agy.v<version>.orig backup and re-signs the binary.
 """
@@ -24,7 +24,7 @@ import subprocess
 import sys
 from typing import NamedTuple
 
-import prompt_templates
+from tools import prompt_templates
 
 
 VM_BASE = 0x100000000
@@ -201,8 +201,8 @@ HOME = pathlib.Path.home()
 REPO = pathlib.Path(__file__).resolve().parent
 GEMINI_WRAPPER_TARGET = HOME / ".gemini/bin/agy"
 DEFAULT_BINARIES: tuple[pathlib.Path, ...] = (HOME / ".local/bin/agy", GEMINI_WRAPPER_TARGET)
-HUB_WRAPPER_SOURCE = REPO / "hub-wrapper.sh"
-STATUSLINE_SOURCE = REPO / "statusline.sh"
+HUB_WRAPPER_SOURCE = REPO / "runtime/agy-wrapper.sh"
+STATUSLINE_SOURCE = REPO / "runtime/statusline.sh"
 STATUSLINE_TARGET = HOME / ".gemini/antigravity-cli/statusline.sh"
 
 SETTINGS_PATH = HOME / ".gemini/antigravity-cli/settings.json"
@@ -3683,7 +3683,7 @@ def resolve_patch_sites(data: bytes | bytearray, version: str, strict: bool = Fa
 
 
 # Stock shapes. A site whose original bytes are read from the binary reads as `unpatched` wherever its
-# resolver lands (references/context-window-patch.md §5.6). So every code site's stock bytes are also
+# resolver lands (docs/references/context-window-patch.md §5.6). So every code site's stock bytes are also
 # pinned by shape: the instructions with each operand that moves between releases masked out (branch
 # and page targets, frame slots, struct fields). site_shapes.json holds the shapes a person has reviewed;
 # --apply refuses a clean binary that shows any other, and --accept-shapes records them after review.
@@ -3879,6 +3879,7 @@ def apply_patch(path: pathlib.Path) -> None:
     if path == GEMINI_WRAPPER_TARGET and HUB_WRAPPER_SOURCE.exists():
         state, _ = inspect_binary(path)
         if state != "wrapper" or path.read_bytes() != HUB_WRAPPER_SOURCE.read_bytes():
+            path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(HUB_WRAPPER_SOURCE, path)
             sidecar = path.parent / "agy.version.json"
             if sidecar.exists():
@@ -3917,8 +3918,8 @@ def apply_patch(path: pathlib.Path) -> None:
         raise RuntimeError(
             f"Stock code at {len(unreviewed)} site(s) in {source} has a shape no reviewed release had:\n  "
             + "\n  ".join(unreviewed)
-            + "\nA site can land on the wrong instructions and still read as clean (references/context-window-patch.md §5.6)."
-            "\nRead them with `probe_agy.py sites <previous .orig> <this .orig>`, then record them:"
+            + "\nA site can land on the wrong instructions and still read as clean (docs/references/context-window-patch.md §5.6)."
+            "\nRead them with `python3 tools/probe_agy.py sites <previous .orig> <this .orig>`, then record them:"
             f"\n  patch_agy.py --accept-shapes --binary {path}"
         )
     for site in sites:
@@ -4027,6 +4028,7 @@ def main() -> int:
         if STATUSLINE_SOURCE.exists() and (
             not STATUSLINE_TARGET.exists() or STATUSLINE_SOURCE.read_bytes() != STATUSLINE_TARGET.read_bytes()
         ):
+            STATUSLINE_TARGET.parent.mkdir(parents=True, exist_ok=True)
             tmp_sl = STATUSLINE_TARGET.with_suffix(".sh.tmp")
             shutil.copy2(STATUSLINE_SOURCE, tmp_sl)
             tmp_sl.replace(STATUSLINE_TARGET)

@@ -1,89 +1,127 @@
-# `agy-patch`: Antigravity CLI Reverse Engineering & Binary Tooling
+# `agy-patch`
 
-Progressive-disclosure hub for `agy` (`darwin/arm64`) binary patches, Go `__lrodata_gopcln` introspection, and internal architecture references.
+English | [中文](README.zh.md)
 
-## 1. Reference Modules (Read On-Demand)
+Fail-closed, version-adaptive binary patcher, prompt-cache keepalive wrapper, powerline statusline, and upgrade-rehearsal toolchain for Google Antigravity CLI (`agy`, `darwin/arm64`).
 
-| Module | Topic | When to Read |
-| :--- | :--- | :--- |
-| [`references/context-window-patch.md`](./references/context-window-patch.md) | 42-site ARM64 binary patch (`972B`) unlocking `/model` `Tab` Context selector (`256K`/`512K`/`900K`) on Gemini 4 Argon, Carbon and Hydrogen, Gemini 4 Hydrogen as a built-in model with a low–xhigh gauge under an enterprise gateway, Cortex checkpointer >256K ceiling & 64K `USER_INPUT` step clamp removal, accurate statusline token accounting, 15s idle statusline refresh, persistent full multi-line CoT rendering (`∴ Thought...`, flush-left paragraphs separated by 1 blank line `\n\n`), native terminal `Faint` + `Italic` CoT & `Tool(xxx)` typography, full-width user prompt bar (adaptive Dark `237` / Light `254`) with a dimmed `Faint` `>` chevron and a 1-line sticky header, semantic ANSI `"terminal"` palette alignment, and a user bar that follows the terminal's light/dark switch live (DEC mode 2031). §5 records authoring pitfalls (hand-assembled hex, hard-coded stack offsets, the shared bar-color byte). | Modifying context window limits, statusline denominators/refresh cadence, TUI CoT, `Tool(xxx)` or user prompt typography, ANSI palette colors, or `patch_agy.py`. **Read §5 before adding or editing any site.** |
-| [`references/tui-styles-and-palette.md`](./references/tui-styles-and-palette.md) | Complete 20-slot `types.ColorPalette["terminal"]` table, 82-field `render.Styles` offset & consumer map (`toolStatusIcon` dots, `ToolName`, `ToolArgs`, `PromptChevron`, `RunningLight`, `CCILink`, `CoT`), `lipgloss.Style` memory layout (`648B`), Glamour `ansi.StyleConfig` inline `Code.Color` offsets, and TUI rendering pipeline invariants (`itemRenderer.render`, `RenderedItem[+0x58]`, `padLinesToWidth`/`closedLineWidth`, `applyLiveHeightRatchet`, `AutoCloseMarkdown`). | Looking up any TUI color, `Styles[+offset]`, tool dot state (`●`), spinner shimmer, Markdown style, or scrollback/ratchet rendering invariant without running `lldb`. |
-| [`references/subagents-and-models.md`](./references/subagents-and-models.md) | `invoke_subagent` / `define_subagent` internals, custom `agent.md` YAML schema, `geminimodels.Catalog` default tiers (`pro` = `gemini-4-argon-high`, `flash` = `gemini-3.8-flash-medium`, `flash_lite` = `gemini-3.1-flash-lite-preview`), and `CLIProxyAPI` routing. | Configuring subagents, model tiers, `config.json` vs `settings.json`, or debugging `flash_lite` 400 errors. |
-| [`references/hub-and-vscode-extension.md`](./references/hub-and-vscode-extension.md) | `agy` CLI (`jetbox`) vs `agy --hub` (`agyhub` / LS `v2.29.0`) vs VS Code extension (`1.11.0`), hidden flags, `applyModelBackendSelection` (`0x102ecb710`), `ModelProvider.GetUserStatus` disassembly, and zero-env local gateway routing. | Routing VS Code extension or `--hub` through `CLIProxyAPI` (`127.0.0.1:5233`), inspecting hidden Hub flags, or debugging Account/Quota UI under API keys. |
-| [`references/system-prompt.md`](./references/system-prompt.md) | How the CLI system prompt is assembled (template vs Go sections, user-turn injection of modes and slash commands, lazy vs eager MCP), every control surface and its limits (template slot overrides, `mainAgent` agent.md, hooks, Go literals), and the v1.5.3 decisions. | Tailoring the CLI system prompt, or deciding which mechanism can reach a given section. |
-| [`references/pending-line.md`](./references/pending-line.md) | The line under the conversation while a turn runs: how `pendingLineView` assembles glyph, state text, running light and decoration; the breathing star, the Gemini band through the seasonal-theme path, and the per-turn verbs; `activityCandidate`'s state branches and the `AgentState` label table; why a thought stayed invisible until its answer began (the drip held it) and how it now shows live; how `verbosity` groups thoughts and tool calls; the elapsed-time design; glyph choice against Maple Mono; and how to observe the line in a pseudo-terminal. | Changing the spinner, the state text or its suffix, or making thoughts stream into the conversation. |
-| [`diagnostics/2026-11-04-400-investigation.md`](./diagnostics/2026-11-04-400-investigation.md) | Forensic comparison of transient upstream `400 INVALID_ARGUMENT` vs `200 OK` on identical payloads and print-mode error status behavior. | Diagnosing upstream 400s, thought-signature handling, or `modelProvider` overrides. |
+> **Why this exists:** Official `agy` updates replace a single closed-source Go Mach-O binary (`~/.local/bin/agy`) and silently drop customizations. `agy-patch` anchors patches to Go `pclntab` symbols and instruction shapes, verifies every stock site before writing, isolates upgrades through dry-run rehearsal, and cleanly separates binary patching, runtime wrappers, and system-prompt overrides.
 
 ---
 
-## 2. Executable Tools
+## Features
 
-| Tool | Purpose | Common Commands |
-| :--- | :--- | :--- |
-| [`patch_agy.py`](./patch_agy.py) | Version-adaptive patcher: 41 code sites (`968B`) for Context Window & Cortex checkpointer/step clamps, StatusLine Idle Refresh, Full-CoT (`∴ Thought...`), CoT/`Tool(xxx)`/user prompt bar typography & Semantic ANSI Palette (`__lrodata_gopcln` + instruction anchors); 3 `MonitorsConfig` sites (`39B`) disabling the synchronous pre-tool LLM monitors (`agy_tool_safety`, `sir_flash_lite`, `severe_internal_risks_agy`); 3 `geminimodels` map sites (`168B`) that mapped `gemini-4-carbon-{low,medium,high}` to the wire model `gemini-4-carbon` (retired on `v1.5.7`, which maps Carbon itself); 16 sites (`992B`) that make Gemini 4 Hydrogen a built-in model in the slots of the unroutable Gemini 3.6 Flash and 3.7 Flash low, so a gateway session lists `Gemini 4 Hydrogen` with a low–xhigh effort gauge and sends `gemini-4-hydrogen` with a `thinkingLevel` (`XHIGH` for xhigh) instead of a custom model's 4096-token thinking budget (retired on `v1.5.8`, which ships Hydrogen as a built-in that sends the same); 7 bubbletea sites (`96B`) that enable DEC mode 2031 and answer each light/dark notification with an OSC 11 query, so the user bar recolors without a restart; 4 sites (`20B`) that draw the `⎿` elbow under command output and alerts in its reply's faint style instead of the bar's; 17 sites (`1716B`) that turn the pending line's braille spinner into a Gemini star that grows from a point and breathes (24 truecolor frames, held in Halloween's logo rows, since Halloween is no longer registered), light its word `#4796E3` with a blue-to-lavender band through the seasonal-theme path that swings back and forth, warm the word through purple to rose over a long turn, and keep a blank row above it that the layout counts; 9 sites (`693B`) that end the pending line's text in `…` and add a gray aside (`#999999`, as Claude Code's) with the turn's elapsed time and its state (`✦ Stargazing… (8s ⋅ thinking with high effort)`, the effort read from the model's label, `deep in thought` past a minute), with or without a tip beneath it; 30 sites (`240B`) that give the transcript's status marks the star's family (`⋆` done or failed, `⊹`/`⋆` pulsing while running, in place of `●`/`○`); 1 site (`46B`) that moves the `native` code style's comment gray off a 246/247 tie, so a comment above a streaming answer no longer flips between two grays; 2 sites (`84B`) that name each turn with one of 24 verbs of the night sky in place of `Thinking` and `Running command`, keeping retry, compaction and loading notices; 6 sites (`68B`) that show a running thought in the conversation as `∴ <latest paragraph>` under the running light, where its finished block will stand, and leave the pending line to say `Thinking`; 3 sites (`16B`) that keep every thought out of tool groups under the default `medium` verbosity, live and when a conversation is rebuilt, while tool calls still group; 4 sites (`84B`) that, under `high` verbosity, stream a running thought as its growing block and close it with the `∴ Thought for` line; 9 sites (`216B`) that, under any other verbosity, fold a finished thought into one line, `∴ Thought for 7s (<title>)`, which ctrl+o expands; plus the templates that `templates/v<ver>/system_prompts/` changes. Every `--apply` rebuilds from the clean `agy.v<ver>.orig` backup, so the binary always equals backup + current sites. It refuses a clean binary whose stock code, at any site, has a shape that [`site_shapes.json`](./site_shapes.json) does not hold (the instructions with addresses, frame slots and struct fields masked), which is how a site that lands on the wrong instructions is caught; `--accept-shapes` records a release's shapes once a person has read them. | `python3 ~/.gemini/agy-patch/patch_agy.py --status -v`<br>`python3 ~/.gemini/agy-patch/patch_agy.py --apply --set-window 512K`<br>`python3 ~/.gemini/agy-patch/patch_agy.py --revert`<br>`python3 ~/.gemini/agy-patch/patch_agy.py --accept-shapes --binary <clean copy>` |
-| [`inspect_agy.py`](./inspect_agy.py) | Fast Mach-O Go `pclntab` symbol finder, ARM64 `BL` call-graph extractor, `(ADRP+ADD, MOV #len)` string literal decoder, and `--styles` 20-slot `ColorPalette` + 82-field `Styles` table dumper. | `python3 ~/.gemini/agy-patch/inspect_agy.py --styles`<br>`python3 ~/.gemini/agy-patch/inspect_agy.py --match geminimodels.Catalog --strings`<br>`python3 ~/.gemini/agy-patch/inspect_agy.py --match InvokeSubagentTool --calls --strings` |
-| [`templates/v<ver>/`](./templates/v1.5.8/README.md) | The whole CLI system prompt of one `agy` release (`v1.5.3`–`v1.5.9`), section by section: Google's originals (`stock/`, all 16 templates), every system prompt template as it should be (`system_prompts/`: Google's text, an empty file to drop a section, or a rewrite), Go-generated sections for reference, and `prompt_overrides.json` with a `reason` for each changed file. `patch_agy.py` picks the directory from the binary's own `--version` and refuses a release that has none. Edit, then `patch_agy.py --apply`. | `python3 ~/.gemini/agy-patch/patch_agy.py --apply` |
-| [`prompt_templates.py`](./prompt_templates.py) | Locates templates through their `embed.FS` entries, checks the binary byte for byte against `templates/v<ver>/stock/`, reconciles `system_prompts/` with it, and prints one template or dumps all 16 (`--dump`). | `python3 ~/.gemini/agy-patch/prompt_templates.py identity.tmpl --binary ~/.local/bin/agy.v1.5.5.orig` |
-| [`capture_prompt.py`](./capture_prompt.py) | Records the exact prompt `agy` sends, via a loopback endpoint that answers 500 (no network, no quota), in an isolated app data dir that is deleted afterwards, and writes it as one readable `PROMPT.md` (sections with their sources, tools, user turns) plus `tools.json`. Stock (`.orig`) captures go to `templates/v<ver>/stock/`; patched captures to `.cache/system-prompt/v<ver>/`. | `python3 ~/.gemini/agy-patch/capture_prompt.py --binary ~/.local/bin/agy.v1.5.5.orig`<br>`python3 ~/.gemini/agy-patch/capture_prompt.py` |
-| [`probe_agy.py`](./probe_agy.py) | Proves a binary as it is used, on a loopback endpoint with an isolated app data dir (no quota). `rehearse` is the whole upgrade rehearsal: it fetches a newer release, and on copies reports what stock sends, scaffolds `templates/v<new>/` when the templates are unchanged, resolves every site group (keep, retired, or re-author), checks stock shapes, patches the copy, and runs the three probes below against the previous release, ending in one verdict table. `wire` prints the model and `thinkingLevel` each picker ID sends. `tui` drives the TUI in a pty through a canned turn, `/model`, its context selector and `/context`, and writes each screen as text with its styled runs; `--against DIR` diffs them with an earlier run. `sites` compares every patch site of two clean binaries, patched bytes and surrounding stock code, to catch a frame slot or struct field that moved. `rehearse` and `tui` need a pty, so run them outside the Claude Code sandbox. | `python3 ~/.gemini/agy-patch/probe_agy.py rehearse`<br>`python3 ~/.gemini/agy-patch/probe_agy.py wire --binary <copy>`<br>`python3 ~/.gemini/agy-patch/probe_agy.py tui --binary <copy> --against <dir>`<br>`python3 ~/.gemini/agy-patch/probe_agy.py sites <old .orig> <new .orig>` |
-| [`check_agy_update.py`](./check_agy_update.py) | Read-only release check. Reads the manifest `agy update` reads (`manifests/<os>_<arch>.json` on the updater service; there is one public channel) and compares it with the installed version, leaving the binary alone. `--fetch DIR` downloads a newer release into an empty directory (resuming if the connection drops), verifies its SHA-512, and unpacks it, ready to patch with `--binary` before anything is replaced. Exits 0 when up to date, 1 when a release is newer, 2 on failure. | `python3 -I ~/.gemini/agy-patch/check_agy_update.py`<br>`python3 -I ~/.gemini/agy-patch/check_agy_update.py --fetch "$(mktemp -d)/agy"` |
-| [`hub-wrapper.sh`](./hub-wrapper.sh) | Lightweight wrapper installed at `~/.gemini/bin/agy` (synced automatically by `patch_agy.py --apply`). Sets `AGY_CLI_DISABLE_AUTO_UPDATE=true`, passes `--hub` (VS Code extension) straight to `~/.local/bin/agy` with native Google OAuth, and for interactive / `acp` sessions starts `cache_relay.py` and injects `CLOUD_CODE_URL` (`AGY_CACHE_RELAY=off` disables the relay), while delegating execution to the patched binary at `~/.local/bin/agy`. | `cp -f ~/.gemini/agy-patch/hub-wrapper.sh ~/.gemini/bin/agy` |
-| [`cache_relay.py`](./cache_relay.py) | Prompt cache keepalive. A per-process loopback relay passes Cloud Code traffic through unchanged, records each session's last main request in `/tmp/agy_cache_<id>.dat`, and on `POST /_touch/<id>` replays it with a fresh `requestId`, closing the stream after the first SSE event. `statusline.sh` drives it: in the last 60s of the 5-minute TTL (a touch about every 4 minutes), for Argon, Carbon and Hydrogen main-session prompts of at least 32K tokens (`KEEPALIVE_MODELS`), at most 4 touches per idle stretch. A compaction request, manual (`/compact`) or automatic, is never replayed: it would only keep the pre-compaction prefix warm. A turn counts once upstream accepts it (HTTP 200), even if interrupted; a rejected one leaves the countdown alone. Exits with its agy process. A hit cannot be confirmed per touch: streams report `cachedContentTokenCount` only in their final event. | `AGY_CACHE_RELAY=off agy` disables it.<br>`/tmp/agy_cache_relay.log` keeps the last 200 lines (~30KB) across all sessions: one `turn` line per main request (model, tools, turns, last turn) and one per touch; `AGY_CACHE_RELAY_DEBUG=1` adds every request. State files untouched for a day are swept at relay start. |
-| [`statusline.sh`](./statusline.sh) | Custom TUI statusline script synced to `~/.gemini/antigravity-cli/statusline.sh`. Under the relay, its cache countdown follows the relay's record of real upstream requests and marks the keepalive: `↻` while armed, `↻n` after n touches, `✗` once a touch has failed. | Configured via `statusLine.command` in `~/.gemini/antigravity-cli/settings.json`. |
-| [`diagnostics/cache_ttl_probe.py`](./diagnostics/cache_ttl_probe.py) | Measures implicit cache survival through CPA with synthetic ~31K-token prefixes: write, touch, and read on a schedule, or `--resume` a run to keep touching every 4 minutes until the first miss. Sends real inference requests. | `python3 -I ~/.gemini/agy-patch/diagnostics/cache_ttl_probe.py` |
-| [`consult_gemini_mcp.py`](./consult_gemini_mcp.py) (`consult_gemini/`) | Zero-dependency MCP stdio server + singleton Unix-socket Hub (`~/.gemini/antigravity-acp/hub.sock`) multiplexing N Claude Code instances onto one persistent `agy acp` process. Defaults to `gemini-4-carbon` through the local CLIProxyAPI gateway (`AGY_ACP_GATEWAY=1`; `0` restores Cloud Code), `high` effort (`effort: medium` on request; `flash: true` asks `gemini-3.8-flash`), `512K` context window, read-only `request-review` permission gate, a turn cancelled after 10 minutes without an update or an hour in all (`AGY_CONSULT_STALL_SEC`, `AGY_CONSULT_MAX_SEC`), a failed turn that returns its still-open `session_id` with whatever it had written, a Hub that cancels its consults cleanly on SIGTERM, sessions that last five minutes after their last reply, the life of the prompt cache (`session/new`, `session/close` on expiry or window exit, a lapsed `session_id` refused instead of reloaded, and end-to-end `session/cancel` propagation), plus exact SQLite `gen_metadata` token/cache/TTFT/TPS telemetry. | Registered in `~/.claude.json` under `mcpServers.gemini`. |
+- **Context Window & Checkpointer Unlock** (`patch_agy.py`): Enables `/model` `Tab` context selection (`256K` / `512K` / `900K`) on Gemini 4 Argon, Carbon, and Hydrogen, removes >256K checkpoint and 64K `USER_INPUT` step clamps, and fixes statusline token accounting + 15s idle refresh.
+- **TUI & CoT Readability**: Full multi-line `∴ Thought...` rendering (live one-liner under `medium` verbosity, full streaming block under `high`), native terminal `Faint` + `Italic` typography, semantic ANSI `"terminal"` palette alignment, adaptive Dark/Light full-width user prompt bar with live DEC 2031 theme switching, and the breathing Gemini star pending line.
+- **System Prompt Trimming** (`templates/v<ver>/`): Byte-verified overrides for embedded `system_prompts/*.tmpl` slots with explicit per-file rationale in `prompt_overrides.json`.
+- **Prompt Cache Keepalive Relay** (`runtime/agy-wrapper.sh` + `runtime/cache_relay.py`): Disables silent background auto-updates (`AGY_CLI_DISABLE_AUTO_UPDATE=true`) and keeps the 5-minute implicit prompt cache warm during idle stretches for interactive and `acp` sessions (`AGY_CACHE_RELAY=off` disables it).
+- **Pastel Powerline Statusline** (`runtime/statusline.sh`): Single-pass `jq` telemetry bar showing context usage, tokens, step latency/TPS, quota, and cache TTL keepalive state (`↻`, `↻n`, `✗`).
+- **Fail-Closed Upgrade Rehearsal** (`tools/probe_agy.py`): Downloads and SHA-512 verifies new releases in a temp workspace, resolves all patch sites, verifies instruction shapes (`site_shapes.json`), and probes wire payloads & PTY TUI screens before touching the installed binary.
+- **Optional ACP MCP Hub** (`integrations/consult_gemini/`): Zero-dependency MCP stdio server + singleton Unix-socket Hub exposing read-only `consult_gemini` over persistent `agy acp` with SQLite `gen_metadata` telemetry.
 
 ---
 
-## 3. Updating `agy`
+## Requirements & Support Matrix
 
-Auto-update is off (`AGY_CLI_DISABLE_AUTO_UPDATE=true`, exported in `~/.zshrc` and `hub-wrapper.sh`), so a background update never silently replaces the patched binary. `updater.triggerUpdateShared` accepts only the exact string `true`; `1` is ignored. `check_agy_update.py` says whether a newer release exists. Rehearse it first: `probe_agy.py rehearse` fetches and verifies the release, then patches and probes copies, leaving the installed binary alone ([§5.7](./references/context-window-patch.md#57-proving-a-new-release)). Once its table reads `ok` (and each `READ` step is upstream's change, not ours), upgrade:
+- **Platform**: macOS on Apple Silicon (`darwin/arm64`)
+- **Dependencies**: Python `>= 3.12`, `jq`, Xcode Command Line Tools (`codesign`)
+- **Supported `agy` releases**: `v1.5.3`, `v1.5.5`, `v1.5.6`, `v1.5.7`, `v1.5.8`, `v1.5.9`
+
+---
+
+## Quick Start (For Humans & Deploying Agents)
+
+Paths are standardized around `~/.gemini/agy-patch`, `~/.local/bin/agy`, and `~/.gemini/bin/agy`.
+
+### 1. Clone & Preview (`--dry-run`)
 
 ```sh
-env -u AGY_CLI_DISABLE_AUTO_UPDATE agy update
-python3 ~/.gemini/agy-patch/patch_agy.py --apply      # backs up the new clean binary, then patches it
-python3 ~/.gemini/agy-patch/patch_agy.py --status -v  # every site must read `patched`
+git clone https://github.com/wscffaa/agy-patch.git ~/.gemini/agy-patch
+python3 ~/.gemini/agy-patch/scripts/install.py --dry-run
 ```
 
-If any anchor fails to resolve, stop and read [`references/context-window-patch.md` §5](./references/context-window-patch.md#5-authoring-pitfalls) before changing a site. Delete the previous version's `.orig` once the new one is verified.
+### 2. Install (Idempotent)
 
+```sh
+python3 ~/.gemini/agy-patch/scripts/install.py --set-window 512K
+```
+
+What `install.py` does:
+1. Verifies OS/arch, Python `>= 3.12`, `codesign`, `jq`, and that `~/.local/bin/agy --version` has a matching `templates/v<ver>/` directory.
+2. Backs up the clean binary to `~/.local/bin/agy.v<ver>.orig`, patches & ad-hoc signs `~/.local/bin/agy`.
+3. Syncs [`runtime/agy-wrapper.sh`](runtime/agy-wrapper.sh) to `~/.gemini/bin/agy` and [`runtime/statusline.sh`](runtime/statusline.sh) to `~/.gemini/antigravity-cli/statusline.sh`.
+4. Merges `statusLine` and `contextWindow` into `~/.gemini/antigravity-cli/settings.json` without overwriting existing settings.
+5. Adds a managed `# >>> agy-patch >>>` block to `~/.zshrc` (`AGY_CLI_DISABLE_AUTO_UPDATE=true` + `alias agy="$HOME/.gemini/bin/agy"`). Pass `--skip-shell` to manage `~/.zshrc` yourself.
+
+### 3. Verify
+
+Open a new shell (or run `source ~/.zshrc`) and verify:
+
+```sh
+type agy
+agy --version
+python3 ~/.gemini/agy-patch/patch_agy.py --status -v
+```
+
+`type agy` should point to `~/.gemini/bin/agy`, and `patch_agy.py --status -v` should report `patched` for `~/.local/bin/agy` and `wrapper` for `~/.gemini/bin/agy`.
+
+### Uninstall / Rollback
+
+```sh
+python3 ~/.gemini/agy-patch/scripts/install.py --uninstall
+```
+
+This restores `~/.local/bin/agy` from its `.orig` backup, removes the installed wrapper and statusline copy, cleans the managed `statusLine` entry, and strips the `# >>> agy-patch >>>` block from `~/.zshrc`.
 
 ---
 
-## 4. First-Time Setup (For Humans & Deploying Agents)
+## Safe Upgrade Workflow
 
-Paths are fixed: the wrapper, the docs and the tools refer to `~/.gemini/agy-patch`, `~/.local/bin/agy` and `~/.gemini/bin/agy` by name. Needs macOS on Apple silicon (`darwin/arm64`), Python 3.12+, `jq` (for the statusline), and the Xcode command line tools (`codesign`).
+Auto-update is disabled because background updates silently overwrite the patched binary (`updater.triggerUpdateShared` checks for the exact string `true`). Always rehearse an upstream release on isolated copies before upgrading:
 
-1. Clone this repository to `~/.gemini/agy-patch`, with a stock `agy` binary at `~/.local/bin/agy` whose `--version` has a matching `templates/v<ver>/` directory here (`v1.5.3`–`v1.5.9`):
-   ```sh
-   git clone https://github.com/wscffaa/agy-patch.git ~/.gemini/agy-patch
-   agy --version
-   ```
-2. Create the target directories, patch the binary, and install both the wrapper (`~/.gemini/bin/agy`) and `statusline.sh` (`~/.gemini/antigravity-cli/statusline.sh`):
-   ```sh
-   mkdir -p ~/.gemini/bin ~/.gemini/antigravity-cli
-   python3 ~/.gemini/agy-patch/patch_agy.py --apply --set-window 512K
-   ```
-   (Creates a clean backup `~/.local/bin/agy.v<ver>.orig`, patches & ad-hoc codesigns `~/.local/bin/agy`, syncs `hub-wrapper.sh` -> `~/.gemini/bin/agy`, syncs `statusline.sh` -> `~/.gemini/antigravity-cli/statusline.sh`, and sets `"contextWindow": "512K"` in `~/.gemini/antigravity-cli/settings.json`.)
-3. Add to `~/.zshrc`, then open a new shell (or `source ~/.zshrc`):
-   ```sh
-   export AGY_CLI_DISABLE_AUTO_UPDATE=true   # the updater accepts only the exact string `true`
-   alias agy="$HOME/.gemini/bin/agy"         # interactive / acp sessions go through the wrapper (cache relay)
-   ```
-   Without the export, a background update replaces the patched binary. Without the alias, `agy` invokes the bare patched binary without `cache_relay.py`.
-4. Enable the statusline in `~/.gemini/antigravity-cli/settings.json`:
-   ```json
-   "statusLine": {"type": "command", "command": "~/.gemini/antigravity-cli/statusline.sh", "enabled": true}
-   ```
-5. Verify the installation:
-   ```sh
-   type agy
-   agy --version
-   python3 ~/.gemini/agy-patch/patch_agy.py --status -v
-   ```
-   `type agy` must point to `~/.gemini/bin/agy`, and `patch_agy.py --status -v` must report `patched` for `~/.local/bin/agy` and `wrapper` for `~/.gemini/bin/agy`.
-6. Optional — local gateway / probe config: if you run `diagnostics/cache_ttl_probe.py` or a local `CLIProxyAPI` (`127.0.0.1:5233`), copy the example env file and set `CPA_API_KEY`:
-   ```sh
-   cp ~/.gemini/agy-patch/agy-gateway.env.example ~/.gemini/agy-gateway.env && chmod 600 ~/.gemini/agy-gateway.env
-   ```
-   Note: `hub-wrapper.sh` uses native Google OAuth by default; `GEMINI_API_KEY` / `GOOGLE_GEMINI_BASE_URL` only take effect when `"modelProvider": "gemini"` is set (via `--settings '{"modelProvider":"gemini"}'`).
+```sh
+# 1. Check whether a newer upstream release exists (read-only)
+python3 -I ~/.gemini/agy-patch/tools/check_agy_update.py
+
+# 2. Download, verify SHA-512, scaffold templates, check stock shapes, and probe wire/TUI on copies
+python3 ~/.gemini/agy-patch/tools/probe_agy.py rehearse
+
+# 3. Once rehearse reports ok (and you have reviewed any READ items):
+env -u AGY_CLI_DISABLE_AUTO_UPDATE agy update
+python3 ~/.gemini/agy-patch/patch_agy.py --apply
+python3 ~/.gemini/agy-patch/patch_agy.py --status -v
+```
+
+If any anchor or stock shape fails, read [`docs/references/context-window-patch.md` §5](docs/references/context-window-patch.md#5-authoring-pitfalls) and [`CONTRIBUTING.md`](CONTRIBUTING.md) before changing a site.
+
+---
+
+## Repository Layout
+
+| Path | Purpose |
+| :--- | :--- |
+| [`patch_agy.py`](patch_agy.py) | Primary version-adaptive ARM64 binary & template patcher (`--apply`, `--revert`, `--status`, `--accept-shapes`) |
+| [`site_shapes.json`](site_shapes.json) | Masked stock instruction shapes for every reviewed site (fail-closed guard against shifted offsets) |
+| [`runtime/`](runtime/agy-wrapper.sh) | Runtime wrapper (`agy-wrapper.sh`), cache keepalive relay (`cache_relay.py`), powerline bar (`statusline.sh`), optional `agy-gateway.env.example` |
+| [`tools/`](tools/probe_agy.py) | Upgrade rehearsal (`probe_agy.py`), release checker (`check_agy_update.py`), Mach-O inspector (`inspect_agy.py`), prompt capture & scrubbing (`capture_prompt.py`, `prompt_templates.py`) |
+| [`scripts/`](scripts/install.py) | Idempotent installer/uninstaller (`install.py`) and repo sustainability gate (`check_repo.py`) |
+| [`templates/`](templates/v1.5.9/README.md) | Per-release (`v1.5.3`–`v1.5.9`) stock templates, captured `PROMPT.md`/`tools.json`, desired overrides, and `prompt_overrides.json` |
+| [`integrations/`](integrations/consult_gemini_mcp.py) | Optional `consult_gemini` MCP stdio server + ACP Unix-socket Hub (`consult_gemini/`) |
+| [`docs/`](docs/architecture.md) | Architecture overview, reverse-engineering references (`docs/references/`), and forensic diagnostics (`docs/diagnostics/`) |
+| [`tests/`](tests/test_repo_invariants.py) | Offline unit & repo-invariant test suite (`python3 -m unittest discover -s tests -v`) |
+
+---
+
+## Checks & CI
+
+Run the sustainability gate and test suite locally:
+
+```sh
+python3 ~/.gemini/agy-patch/scripts/check_repo.py
+python3 -m unittest discover -s ~/.gemini/agy-patch/tests -v
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull request across Linux and macOS.
+
+## License
+
+[MIT](LICENSE)

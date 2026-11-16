@@ -34,8 +34,8 @@ import uuid
 from pathlib import Path
 
 CPA = "http://127.0.0.1:5233"
-SECRETS = Path.home() / ".gemini/agy-gateway.env"  # the file hub-wrapper.sh sources
-LOG_DIR = Path(__file__).resolve().parent.parent / ".cache" / "cache-ttl"
+SECRETS = Path.home() / ".gemini/agy-gateway.env"  # optional local gateway env (see runtime/agy-gateway.env.example)
+LOG_DIR = Path(__file__).resolve().parent.parent.parent / ".cache" / "cache-ttl"
 WORDS = ("river stone ledger orbit lantern quiet harbor signal copper meadow vector "
          "anchor glacier thread circuit ember valley prism archive tide compass ridge "
          "falcon mosaic beacon cedar spindle quartz harvest canyon").split()

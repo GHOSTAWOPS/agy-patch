@@ -28,16 +28,20 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
 from typing import NamedTuple
 
-import prompt_templates
+REPO = Path(__file__).resolve().parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from tools import prompt_templates
 
 HOME = Path.home()
 DEFAULT_BINARY = HOME / ".local/bin/agy"
-REPO = Path(__file__).resolve().parent
 STOCK_OUT = REPO / "templates"                  # templates/v<version>/stock/: what Google ships
 PATCHED_OUT = REPO / ".cache/system-prompt"     # regenerated on demand; never a source of truth
 STATE_SUBDIR = "agy-patch/.capture-state"  # `--app_data_dir` is relative to ~/.gemini
@@ -45,6 +49,10 @@ SECTION_RE = re.compile(r"^<([A-Za-z][\w ]*)>\n", re.M)
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 RULES_RE = re.compile(r"<RULE\[[^\]]*\]>.*</RULE\[[^\]]*\]>", re.S)
 RULES_MARK = "[dynamic: your AGENTS.md / rules]"
+USER_SKILL_RE = re.compile(r"^- .+ \((?!<appDataDir>/builtin/skills/)[^)]+/SKILL\.md\):.*$")
+USER_SKILLS_MARK = "[dynamic: user skills]"
+MCP_FORMAT_END = "<toolName>\n```\n"
+MCP_SERVERS_MARK = "# [dynamic: configured MCP servers]"
 
 
 class _Recorder(http.server.BaseHTTPRequestHandler):
@@ -105,6 +113,7 @@ def normalize(text: str, workspace: Path) -> str:
     for path in sorted({str(workspace), str(workspace.resolve())}, key=len, reverse=True):
         text = text.replace(path, "<workspace>")
     text = text.replace(str(HOME / ".gemini" / STATE_SUBDIR), "<appDataDir>")
+    text = text.replace(str(HOME), "<home>")
     text = UUID_RE.sub("<uuid>", text)
     return re.sub(r"(The current local time is: )\S+", r"\1<local-time>", text)
 
@@ -177,13 +186,30 @@ def section_source(body: str, data: bytes, tmpl_lines: list[str]) -> str:
     return " + ".join(k for k in ("template", "Go", "dynamic") if sizes.get(k, 0) / total >= 0.05) or "template"
 
 
-def approx_tokens(chars: int) -> int:
-    return round(chars / 4)  # English-heavy prompt text averages ~4 chars per token
-
-
 def withhold_rules(text: str) -> str:
     """Hide the user's own rules: PROMPT.md gets committed and shared. Reported sizes still count them."""
     return RULES_RE.sub(RULES_MARK, text)
+
+
+def withhold_user_context(section_name: str, body: str) -> str:
+    """Scrub user-specific rules, personal skills, and configured MCP servers from captured sections."""
+    text = withhold_rules(body)
+    if section_name == "skills":
+        kept: list[str] = []
+        redacted = False
+        for line in text.splitlines():
+            if USER_SKILL_RE.match(line):
+                redacted = True
+                continue
+            kept.append(line)
+        if redacted:
+            kept.append(USER_SKILLS_MARK)
+        return "\n".join(kept) + ("\n" if text.endswith("\n") else "")
+    if section_name == "mcp_servers" and MCP_FORMAT_END in text:
+        head, tail = text.split(MCP_FORMAT_END, 1)
+        if tail.strip():
+            return f"{head}{MCP_FORMAT_END}{MCP_SERVERS_MARK}\n"
+    return text
 
 
 def fence(text: str) -> list[str]:
@@ -208,7 +234,7 @@ def write_prompt_doc(dest: Path, title: str, captures: dict[str, Capture], data:
     out += ["## 1. System Instruction", "", "| # | Section | Source | Chars |", "| ---: | :--- | :--- | ---: |"]
     out += [f"| {i} | `{n}` | {src} | {len(b):,} |" for i, ((n, b), src) in enumerate(zip(first.sections, sources), 1)]
     for i, ((name, body), src) in enumerate(zip(first.sections, sources), 1):
-        out += ["", f"### 1.{i} `<{name}>` · {src} · {len(body):,} chars", "", *fence(withhold_rules(body))]
+        out += ["", f"### 1.{i} `<{name}>` · {src} · {len(body):,} chars", "", *fence(withhold_user_context(name, body))]
 
     out += ["", "## 2. Tools", "", "| Tool | Schema chars | Description |", "| :--- | ---: | :--- |"]
     for t in first.tools:

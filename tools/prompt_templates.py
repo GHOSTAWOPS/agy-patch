@@ -16,8 +16,8 @@ Patching from a clean backup stops unless every binary template equals its stock
 and `prompt_overrides.json` must give a `reason` for every file that differs from stock.
 
 Run directly to print one template, or dump every embedded template:
-    python3 prompt_templates.py identity.tmpl [--binary ~/.local/bin/agy.v1.5.3.orig]
-    python3 prompt_templates.py --dump $TMPDIR/templates --binary ~/.local/bin/agy.v1.5.3.orig
+    python3 tools/prompt_templates.py identity.tmpl [--binary ~/.local/bin/agy.v1.5.3.orig]
+    python3 tools/prompt_templates.py --dump $TMPDIR/templates --binary ~/.local/bin/agy.v1.5.3.orig
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from typing import NamedTuple
 VM_BASE = 0x100000000  # agy's Mach-O maps every section at VM_BASE + file offset
 TEMPLATE_ROOT = b"google3/third_party/jetski/prompt/template_provider/templates/"
 TEMPLATE_DIR = TEMPLATE_ROOT + b"system_prompts/"
-TEMPLATES_ROOT = pathlib.Path(__file__).resolve().parent / "templates"  # one v<version>/ directory per agy release
+TEMPLATES_ROOT = pathlib.Path(__file__).resolve().parent.parent / "templates"  # one v<version>/ directory per agy release
 
 
 class TemplateSlot(NamedTuple):
@@ -110,7 +110,7 @@ def version_dir(version: str) -> pathlib.Path:
     if not path.is_dir():
         raise RuntimeError(
             f"No templates/v{version}/ for agy v{version}. Create it: dump the new stock templates "
-            f"(prompt_templates.py --dump templates/v{version}/stock --binary <new .orig>), copy the previous "
+            f"(tools/prompt_templates.py --dump templates/v{version}/stock --binary <new .orig>), copy the previous "
             f"version's system_prompts/ and prompt_overrides.json, and review each changed file against stock/."
         )
     return path

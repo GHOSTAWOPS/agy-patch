@@ -11,16 +11,16 @@ isolated app data dir:
             context selector and `/context`; writes each screen as text plus its styled runs
     sites   compares every patch site of two clean binaries: patched bytes, and the stock code around
             them. A site whose bytes are derived from the binary always reads as clean, so this is
-            what catches a struct field or frame slot that moved (references/context-window-patch.md §5.4)
+            what catches a struct field or frame slot that moved (docs/references/context-window-patch.md §5.4)
 
 `tui --against DIR` diffs the new snapshots against an earlier run, with versions, temp paths and
 elapsed seconds masked. A pty cannot be opened inside the Claude Code sandbox; run `tui` outside it.
 
-    python3 probe_agy.py rehearse
-    python3 probe_agy.py wire  --binary /tmp/agy-new/agy
-    python3 probe_agy.py tui   --binary ~/.local/bin/agy --out /tmp/tui-old
-    python3 probe_agy.py tui   --binary /tmp/agy-new/agy --out /tmp/tui-new --against /tmp/tui-old
-    python3 probe_agy.py sites ~/.local/bin/agy.v1.5.7.orig /tmp/agy-new/agy.v1.5.8.orig
+    python3 tools/probe_agy.py rehearse
+    python3 tools/probe_agy.py wire  --binary /tmp/agy-new/agy
+    python3 tools/probe_agy.py tui   --binary ~/.local/bin/agy --out /tmp/tui-old
+    python3 tools/probe_agy.py tui   --binary /tmp/agy-new/agy --out /tmp/tui-new --against /tmp/tui-old
+    python3 tools/probe_agy.py sites ~/.local/bin/agy.v1.5.7.orig /tmp/agy-new/agy.v1.5.8.orig
 """
 
 from __future__ import annotations
@@ -45,9 +45,12 @@ import threading
 import time
 from pathlib import Path
 
-import capture_prompt
+REPO = Path(__file__).resolve().parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
 import patch_agy
-import prompt_templates
+from tools import capture_prompt, prompt_templates
 
 DEFAULT_BINARY = Path.home() / ".local/bin/agy"
 STATE_DIR = Path.home() / ".gemini" / capture_prompt.STATE_SUBDIR
@@ -494,7 +497,7 @@ def _scaffold_templates(stock: Path, version: str, old_version: str) -> tuple[st
 
 def _stock_prompt(backup: Path, version: str, old_version: str) -> tuple[str, str]:
     """Capture the stock prompt and tools; an experiment's default can change what the same templates render."""
-    run = subprocess.run([sys.executable, str(capture_prompt.REPO / "capture_prompt.py"), "--binary", str(backup)], capture_output=True, text=True)
+    run = subprocess.run([sys.executable, str(REPO / "tools/capture_prompt.py"), "--binary", str(backup)], capture_output=True, text=True)
     if run.returncode:
         return "FAIL", f"capture_prompt.py: {run.stderr.strip().splitlines()[-1] if run.stderr.strip() else run.returncode}"
     new, old = (prompt_templates.TEMPLATES_ROOT / f"v{v}" / "stock" for v in (version, old_version))
@@ -530,7 +533,7 @@ def rehearse(stock: Path | None, old: Path | None, workdir: Path | None, no_tui:
         raise SystemExit(f"{old} is missing: give the previous release's clean binary with --old")
     workdir = workdir or Path(tempfile.mkdtemp(prefix="agy-rehearsal-"))
     if stock is None:
-        fetch = subprocess.run([sys.executable, "-I", str(capture_prompt.REPO / "check_agy_update.py"), "--fetch", str(workdir / "release")],
+        fetch = subprocess.run([sys.executable, "-I", str(REPO / "tools/check_agy_update.py"), "--fetch", str(workdir / "release")],
                                capture_output=True, text=True)
         print(fetch.stdout.strip())
         if fetch.returncode == 0:  # up to date: nothing to rehearse
@@ -574,7 +577,7 @@ def rehearse(stock: Path | None, old: Path | None, workdir: Path | None, no_tui:
             verdict = "RE-AUTHOR" if dirty else "retired" if was not in ("0", "failed") and not result else "keep"
             print(f"  {verdict:10s} {name:20s} {was:>3} -> {len(result):<3}" + (f" stock bytes unknown at: {dirty[0]}" if dirty else ""))
     if broken:
-        step("resolve", "FAIL", f"{broken} group(s) to re-author; read references/context-window-patch.md §5 first")
+        step("resolve", "FAIL", f"{broken} group(s) to re-author; read docs/references/context-window-patch.md §5 first")
         return finish()
     sites = patch_agy.resolve_patch_sites(new_data, version, strict=True)
     step("resolve", "ok", f"{len(sites)} sites resolve on the clean v{version}")

@@ -14,10 +14,10 @@ if [[ "$*" == *"--hub"* ]]; then
 fi
 
 # Interactive and ACP sessions send Cloud Code traffic through a per-process loopback relay
-# that keeps an idle session's implicit prompt cache warm (agy-patch/cache_relay.py). Both read
-# CLOUD_CODE_URL. Print mode, other subcommands, AGY_CACHE_RELAY=off, and any relay failure use
-# direct endpoints.
-relay_py=$HOME/.gemini/agy-patch/cache_relay.py
+# that keeps an idle session's implicit prompt cache warm (agy-patch/runtime/cache_relay.py). Both
+# read CLOUD_CODE_URL. Print mode, other subcommands, AGY_CACHE_RELAY=off, and any relay failure
+# use direct endpoints.
+relay_py=$HOME/.gemini/agy-patch/runtime/cache_relay.py
 if [[ "${AGY_CACHE_RELAY:-}" != off && -r $relay_py && ( $# -eq 0 || "$1" == -* || "$1" == "acp" ) ]] &&
    (( ! ${argv[(I)(-p|--print|--prompt|--login|--help|-h)(|=*)]} )); then
   # A nested agy inherits its parent's relay as GOOGLE_GEMINI_BASE_URL; chain to the original.

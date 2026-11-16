@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Loopback relay that keeps an idle agy session's implicit prompt cache warm.
 
-hub-wrapper.sh starts one relay per interactive agy process and points agy's
+runtime/agy-wrapper.sh starts one relay per interactive agy process and points agy's
 CLOUD_CODE_URL at it (the CLI has no --cloud_code_endpoint flag; only --hub does).
 When agy runs with modelProvider "gemini", the wrapper also points
 GOOGLE_GEMINI_BASE_URL here and passes the original as --gemini-upstream (CPA).

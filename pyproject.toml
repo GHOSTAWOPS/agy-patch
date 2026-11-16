@@ -1,0 +1,21 @@
+[project]
+name = "agy-patch"
+version = "0.1.0"
+description = "Version-adaptive ARM64 binary patcher, cache-relay wrapper, statusline, and upgrade harness for Google Antigravity CLI (agy)."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/wscffaa/agy-patch"
+Repository = "https://github.com/wscffaa/agy-patch"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = [".cache", "templates"]
