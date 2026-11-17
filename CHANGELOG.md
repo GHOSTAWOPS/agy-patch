@@ -2,6 +2,19 @@
 
 All notable milestones for `agy-patch` are recorded here.
 
+## [Unreleased]
+
+### Added
+- Native Windows/amd64 support (PE32+): context-window presets for the Gemini 4 family, the 256K checkpoint ceiling, both 64K `USER_INPUT` clamps, and prompt-template trimming for `agy v1.5.9`.
+- PE/amd64 resolver (`tools/binfmt.py`, `tools/win_amd64.py`) with exact-byte guards (`site_shapes_windows.json`), a small x86-64 assembler, and a `.text` code cave.
+- Windows installer paths: `%LOCALAPPDATA%\agy\bin\agy.exe`, `%USERPROFILE%\.gemini\bin\agy.cmd` + `agy_wrapper.py`, PowerShell profile block, no `codesign`/`jq` requirement.
+- Cross-platform cache relay (temp-dir state, Windows parent watch) and a Python powerline statusline (`runtime/statusline.py`).
+- Windows PE tests and CI coverage.
+
+### Notes
+- TUI/CoT rendering sites remain macOS/arm64-only.
+- The PE's Authenticode signature is invalidated by patching; Windows still runs the binary.
+
 ## [0.1.0] - 2026-11-16
 
 ### Added

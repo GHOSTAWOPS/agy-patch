@@ -9,7 +9,7 @@ Requests then flow through unchanged: /v1internal paths to Cloud Code, the rest 
 the Gemini upstream. For each main-session streamGenerateContent the relay
 remembers the last body and its headers, keyed by the conversation id that agy
 writes into systemInstruction (".../brain/<id>"), and records the time in
-/tmp/agy_cache_<id>.dat as "ANCHOR_TS TOUCHES STATUS". Title and safety calls carry
+<tempdir>/agy_cache_<id>.dat as "ANCHOR_TS TOUCHES STATUS". Title and safety calls carry
 no brain path and are ignored.
 
 statusline.sh reads that file for the cache countdown and, shortly before the
@@ -22,24 +22,31 @@ The relay prints its port on stdout, then exits when the --parent process does.
 The relay never initiates a touch on its own.
 """
 import argparse
-import fcntl
 import glob
 import http.client
 import json
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+
 CLOUD_CODE = "https://daily-cloudcode-pa.googleapis.com"
 gemini_upstream: str | None = None
 MAX_TOUCHES = 4
 KEEPALIVE_MODELS = ("argon", "carbon", "hydrogen")  # 1M-window Gemini 4 families
-LOG_PATH = "/tmp/agy_cache_relay.log"
+STATE_DIR = os.environ.get("AGY_CACHE_RELAY_DIR") or tempfile.gettempdir()
+os.makedirs(STATE_DIR, exist_ok=True)
+LOG_PATH = os.path.join(STATE_DIR, "agy_cache_relay.log")
 LOG_KEEP = 200  # ~30KB
 SESSION_RE = re.compile(r"brain/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![0-9a-f])")
 # A compaction request, manual (/compact) or automatic, ends with a user turn that is this
@@ -60,7 +67,8 @@ def log(message: str) -> None:
     line = f"{time.strftime('%m-%d %H:%M:%S')} {message}"
     try:
         with open(LOG_PATH, "a+") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(f, fcntl.LOCK_EX)
             f.seek(0)
             lines = f.read().splitlines()[-(LOG_KEEP - 1):] + [line]
             f.truncate(0)
@@ -72,7 +80,7 @@ def log(message: str) -> None:
 def sweep_state(max_age: float = 86400) -> None:
     """Drop state files of conversations untouched for a day; each conversation leaves one."""
     cutoff = time.time() - max_age
-    for path in glob.glob("/tmp/agy_cache_*.dat"):
+    for path in glob.glob(os.path.join(STATE_DIR, "agy_cache_*.dat")):
         try:
             if os.path.getmtime(path) < cutoff:
                 os.remove(path)
@@ -95,7 +103,7 @@ def connect(origin: str, timeout: float) -> http.client.HTTPConnection:
 
 
 def write_state(sid: str, anchor: int, touches: int, status: str) -> None:
-    path = f"/tmp/agy_cache_{sid}.dat"
+    path = os.path.join(STATE_DIR, f"agy_cache_{sid}.dat")
     tmp = f"{path}.{os.getpid()}"
     with open(tmp, "w") as f:
         f.write(f"{anchor} {touches} {status}\n")
@@ -320,15 +328,34 @@ class Relay(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = relay
 
 
+def process_alive(pid: int) -> bool:
+    """True while the wrapper process is still running (POSIX and Windows)."""
+    if os.name == "nt":
+        import ctypes
+
+        synchronize = 0x00100000
+        wait_timeout = 0x102
+        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+        if not handle:
+            return False
+        try:
+            return ctypes.windll.kernel32.WaitForSingleObject(handle, 0) == wait_timeout
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def watch_parent(pid: int) -> None:
     while True:
         time.sleep(2)
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+        if not process_alive(pid):
             os._exit(0)
-        except PermissionError:
-            pass
 
 
 def main() -> None:

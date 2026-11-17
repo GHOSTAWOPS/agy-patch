@@ -28,22 +28,26 @@ from __future__ import annotations
 import argparse
 import codecs
 import difflib
-import fcntl
 import http.server
 import json
 import os
-import pty
 import re
-import select
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
-import termios
 import threading
 import time
 from pathlib import Path
+
+try:  # POSIX pty probe; the rest of the tool works on Windows
+    import fcntl
+    import pty
+    import select
+    import termios
+except ImportError:
+    fcntl = pty = select = termios = None
 
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
@@ -52,7 +56,10 @@ if str(REPO) not in sys.path:
 import patch_agy
 from tools import capture_prompt, prompt_templates
 
-DEFAULT_BINARY = Path.home() / ".local/bin/agy"
+if os.name == "nt":
+    DEFAULT_BINARY = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "agy/bin/agy.exe"
+else:
+    DEFAULT_BINARY = Path.home() / ".local/bin/agy"
 STATE_DIR = Path.home() / ".gemini" / capture_prompt.STATE_SUBDIR
 WIRE_MODELS = [
     *(f"gemini-4-hydrogen-{e}" for e in ("low", "medium", "high", "xhigh")),
@@ -318,6 +325,8 @@ class Screen:
 
 
 def run_tui(binary: Path, out: Path, settings: dict) -> None:
+    if pty is None:
+        raise SystemExit("the TUI probe needs a POSIX pty; run it on macOS or Linux")
     out.mkdir(parents=True, exist_ok=True)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Gemini)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -433,6 +442,18 @@ def compare_sites(old_bin: Path, new_bin: Path, context: int = 0x40) -> int:
     old, new = old_bin.read_bytes(), new_bin.read_bytes()
     resolve = lambda path, data: {s.name: s for s in patch_agy.resolve_patch_sites(data, patch_agy.detect_binary_version(path), strict=True)}
     old_sites, new_sites = resolve(old_bin, old), resolve(new_bin, new)
+    if old[:2] == b"MZ" or new[:2] == b"MZ":
+        flagged = 0
+        for name, site in sorted(new_sites.items()):
+            before = old_sites.get(name)
+            if before is None:
+                print(f"- {name}: only in new")
+                flagged += 1
+            elif (before.original or b"") != (site.original or b"") or before.patched != site.patched:
+                print(f"- {name}: stock/patch bytes changed")
+                flagged += 1
+        print(f"{len(new_sites)} sites, {flagged} to read: PE sites are pinned by exact bytes in site_shapes_windows.json")
+        return flagged
     for label, here, there in (("only in old", old_sites, new_sites), ("only in new", new_sites, old_sites)):
         gone: dict[str, int] = {}
         for name in here.keys() - there.keys():
@@ -462,16 +483,19 @@ def compare_sites(old_bin: Path, new_bin: Path, context: int = 0x40) -> int:
 # --- rehearse ---------------------------------------------------------------------------------
 
 def _stage(clean: Path, dest: Path) -> tuple[Path, Path, str]:
-    """Copy a clean binary to `dest/agy` and link it as the backup --apply patches from; return both and the version."""
+    """Copy a clean binary into `dest` and create the backup --apply patches from; return both and the version."""
     dest.mkdir(parents=True, exist_ok=True)
-    binary = dest / "agy"
+    binary = dest / (clean.name if os.name == "nt" else "agy")
     binary.unlink(missing_ok=True)  # on a second rehearsal `clean` may be this directory's own backup, a link to it
     shutil.copy2(clean, binary)
     binary.chmod(0o755)
     version = patch_agy.detect_binary_version(binary)
     backup = patch_agy.backup_path_for(binary)
     backup.unlink(missing_ok=True)
-    os.link(binary, backup)  # --apply replaces `agy` with a new file, so the link stays clean
+    if os.name == "nt":
+        shutil.copy2(binary, backup)
+    else:
+        os.link(binary, backup)  # --apply replaces `agy` with a new file, so the link stays clean
     return binary, backup, version
 
 
@@ -507,6 +531,81 @@ def _stock_prompt(backup: Path, version: str, old_version: str) -> tuple[str, st
         return "ok", f"rendered prompt and tool schemas identical to v{old_version}"
     what = " and ".join(n for n, same in (("PROMPT.md", same_prompt), ("tools.json", same_tools)) if not same)
     return "READ", f"{what} differ from v{old_version}: diff templates/v{old_version}/stock templates/v{version}/stock"
+
+
+def rehearse_windows(stock: Path | None, old: Path | None, workdir: Path | None) -> int:
+    """Windows rehearsal: fetch, resolve, patch a copy, and run it. Wire/TUI probes are POSIX-only."""
+    if old is None:
+        old = patch_agy.backup_path_for(DEFAULT_BINARY)
+    if not old.exists():
+        raise SystemExit(f"{old} is missing: give the previous release's clean binary with --old")
+    workdir = workdir or Path(tempfile.mkdtemp(prefix="agy-rehearsal-"))
+    if stock is None:
+        fetch = subprocess.run(
+            [sys.executable, "-I", str(REPO / "tools/check_agy_update.py"), "--fetch", str(workdir / "release")],
+            capture_output=True,
+            text=True,
+        )
+        print(fetch.stdout.strip())
+        if fetch.returncode == 0:
+            shutil.rmtree(workdir, ignore_errors=True)
+            return 0
+        unpacked = re.search(r"^Verified and unpacked: (.+)$", fetch.stdout, re.M)
+        if fetch.returncode != 1 or not unpacked:
+            raise SystemExit(f"check_agy_update.py failed: {fetch.stderr.strip()}")
+        stock = Path(unpacked.group(1))
+
+    new_bin, new_orig, version = _stage(stock, workdir / "new")
+    old_bin, old_orig, old_version = _stage(old, workdir / "old")
+    print(f"rehearsing v{old_version} -> v{version} in {workdir}")
+    report: list[tuple[str, str, str]] = []
+
+    def step(name: str, verdict: str, detail: str) -> None:
+        report.append((name, verdict, detail))
+        print(f"\n== {name}: {verdict}  {detail}", flush=True)
+
+    def finish() -> int:
+        print("\n" + "=" * 100)
+        for name, verdict, detail in report:
+            print(f"{verdict:6s} {name:18s} {detail[:160]}")
+        bad = [v for _, v, _ in report if v in ("FAIL", "REVIEW")]
+        print("=" * 100 + f"\ncopies kept in {workdir}")
+        return 1 if bad else 0
+
+    verdict, detail = _scaffold_templates(new_orig, version, old_version)
+    step("templates", verdict, detail)
+    new_data, old_data = new_orig.read_bytes(), old_orig.read_bytes()
+    try:
+        new_groups = patch_agy.resolve_site_groups(new_data, version, strict=True)
+        old_groups = patch_agy.resolve_site_groups(old_data, old_version, strict=True)
+    except Exception as exc:
+        step("resolve", "FAIL", f"{type(exc).__name__}: {exc}")
+        return finish()
+    broken = 0
+    for name, result in new_groups.items():
+        before = old_groups.get(name)
+        was = "failed" if isinstance(before, Exception) else str(len(before or ()))
+        if isinstance(result, Exception):
+            broken += 1
+            print(f"  RE-AUTHOR  {name:20s} {was:>3} -> ?   {type(result).__name__}: {result}")
+        else:
+            dirty = [s.name for s in result if patch_agy.site_state(new_data, s) != "unpatched"]
+            broken += bool(dirty)
+            print(f"  {'RE-AUTHOR' if dirty else 'keep':10s} {name:20s} {was:>3} -> {len(result):<3}")
+    if broken:
+        step("resolve", "FAIL", f"{broken} group(s) to re-author")
+        return finish()
+    sites = patch_agy.resolve_patch_sites(new_data, version, strict=True)
+    step("resolve", "ok", f"{len(sites)} sites resolve on the clean v{version}")
+    flagged = compare_sites(old_orig, new_orig)
+    step("stock bytes", "READ" if flagged else "ok", f"{flagged} site(s) differ from v{old_version}")
+    patch_agy.apply_patch(new_bin)
+    state = patch_agy.inspect_binary(new_bin)[0]
+    runs = subprocess.run([str(new_bin), "--version"], capture_output=True, text=True).stdout.strip() == version
+    step("apply", "ok" if state == "patched" and runs else "FAIL", f"state {state}; {'runs' if runs else 'DOES NOT RUN'}")
+    step("wire", "skip", "Windows: verify with `agy models` and an ACP initialize handshake")
+    step("screens", "skip", "Windows TUI sites are not ported")
+    return finish()
 
 
 def rehearse(stock: Path | None, old: Path | None, workdir: Path | None, no_tui: bool) -> int:
@@ -652,6 +751,8 @@ def main() -> int:
     if args.command == "wire":
         return 1 if any(v.startswith("FAILED") for v in run_wire(args.binary, args.models).values()) else 0
     if args.command == "rehearse":
+        if os.name == "nt":
+            return rehearse_windows(args.stock, args.old, args.dir)
         return rehearse(args.stock, args.old, args.dir, args.no_tui)
     if args.command == "sites":
         compare_sites(args.old, args.new)

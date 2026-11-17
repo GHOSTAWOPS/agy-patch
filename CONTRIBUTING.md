@@ -2,7 +2,7 @@
 
 English | [中文](CONTRIBUTING.zh.md)
 
-`agy-patch` targets a closed-source Go Mach-O binary (`darwin/arm64`). Sustainability depends on **fail-closed upgrades**: never blindly apply old byte offsets to a new upstream release.
+`agy-patch` targets a closed-source Go binary: Mach-O/arm64 on macOS and PE32+/amd64 on Windows. Sustainability depends on **fail-closed upgrades**: never blindly apply old byte offsets to a new upstream release.
 
 ## Upgrading to a New `agy` Release
 
@@ -28,6 +28,16 @@ English | [中文](CONTRIBUTING.zh.md)
    python3 patch_agy.py --apply
    python3 patch_agy.py --status -v
    ```
+
+## Windows (amd64) Releases
+
+Windows patches are pinned to `agy v1.5.9` in `site_shapes_windows.json`. For a new release:
+
+1. Download `cli_windows_x64.exe` from the updater manifest and verify its SHA-512.
+2. Run `python patch_agy.py --status --binary <new.exe> -v`; a changed `.text` size or any stock-byte mismatch fails closed.
+3. Review the changed function bytes (Go `pclntab` names are identical across platforms), update `STOCK` in `tools/win_amd64.py` only after the instruction shapes are understood, and record the new `.text` bounds and bytes in `site_shapes_windows.json`.
+4. Patch a copy, then verify `agy --version`, `agy models`, and an ACP `initialize` handshake before touching the installed PE.
+5. The TUI/CoT sites are not ported; do not claim parity in docs or `--status` output.
 
 ## Before Opening a PR
 

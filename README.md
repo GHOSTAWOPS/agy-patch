@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Fail-closed, version-adaptive binary patcher, prompt-cache keepalive wrapper, powerline statusline, and upgrade-rehearsal toolchain for Google Antigravity CLI (`agy`, `darwin/arm64`).
+Fail-closed, version-adaptive binary patcher, prompt-cache keepalive wrapper, powerline statusline, and upgrade-rehearsal toolchain for Google Antigravity CLI (`agy`): the full set on macOS/arm64, the core long-conversation set on Windows/amd64.
 
 > **Why this exists:** Official `agy` updates replace a single closed-source Go Mach-O binary (`~/.local/bin/agy`) and silently drop customizations. `agy-patch` anchors patches to Go `pclntab` symbols and instruction shapes, verifies every stock site before writing, isolates upgrades through dry-run rehearsal, and cleanly separates binary patching, runtime wrappers, and system-prompt overrides.
 
@@ -11,10 +11,10 @@ Fail-closed, version-adaptive binary patcher, prompt-cache keepalive wrapper, po
 ## Features
 
 - **Context Window & Checkpointer Unlock** (`patch_agy.py`): Enables `/model` `Tab` context selection (`256K` / `512K` / `900K`) on Gemini 4 Argon, Carbon, and Hydrogen, removes >256K checkpoint and 64K `USER_INPUT` step clamps, and fixes statusline token accounting + 15s idle refresh.
-- **TUI & CoT Readability**: Full multi-line `∴ Thought...` rendering (live one-liner under `medium` verbosity, full streaming block under `high`), native terminal `Faint` + `Italic` typography, semantic ANSI `"terminal"` palette alignment, adaptive Dark/Light full-width user prompt bar with live DEC 2031 theme switching, and the breathing Gemini star pending line.
+- **TUI & CoT Readability** (macOS/arm64): Full multi-line `∴ Thought...` rendering (live one-liner under `medium` verbosity, full streaming block under `high`), native terminal `Faint` + `Italic` typography, semantic ANSI `"terminal"` palette alignment, adaptive Dark/Light full-width user prompt bar with live DEC 2031 theme switching, and the breathing Gemini star pending line.
 - **System Prompt Trimming** (`templates/v<ver>/`): Byte-verified overrides for embedded `system_prompts/*.tmpl` slots with explicit per-file rationale in `prompt_overrides.json`.
-- **Prompt Cache Keepalive Relay** (`runtime/agy-wrapper.sh` + `runtime/cache_relay.py`): Disables silent background auto-updates (`AGY_CLI_DISABLE_AUTO_UPDATE=true`) and keeps the 5-minute implicit prompt cache warm during idle stretches for interactive and `acp` sessions (`AGY_CACHE_RELAY=off` disables it).
-- **Pastel Powerline Statusline** (`runtime/statusline.sh`): Single-pass `jq` telemetry bar showing context usage, tokens, step latency/TPS, quota, and cache TTL keepalive state (`↻`, `↻n`, `✗`).
+- **Prompt Cache Keepalive Relay** (`runtime/agy-wrapper.sh` / `runtime/agy_wrapper.py` + `runtime/cache_relay.py`): Disables silent background auto-updates (`AGY_CLI_DISABLE_AUTO_UPDATE=true`) and keeps the 5-minute implicit prompt cache warm during idle stretches for interactive and `acp` sessions (`AGY_CACHE_RELAY=off` disables it).
+- **Pastel Powerline Statusline** (`runtime/statusline.sh` / `runtime/statusline.py`): Context usage, tokens, step latency/TPS, quota, and cache TTL keepalive state (`↻`, `↻n`, `✗`). The Windows port is dependency-free Python.
 - **Fail-Closed Upgrade Rehearsal** (`tools/probe_agy.py`): Downloads and SHA-512 verifies new releases in a temp workspace, resolves all patch sites, verifies instruction shapes (`site_shapes.json`), and probes wire payloads & PTY TUI screens before touching the installed binary.
 - **Optional ACP MCP Hub** (`integrations/consult_gemini/`): Zero-dependency MCP stdio server + singleton Unix-socket Hub exposing read-only `consult_gemini` over persistent `agy acp` with SQLite `gen_metadata` telemetry.
 
@@ -22,9 +22,9 @@ Fail-closed, version-adaptive binary patcher, prompt-cache keepalive wrapper, po
 
 ## Requirements & Support Matrix
 
-- **Platform**: macOS on Apple Silicon (`darwin/arm64`)
-- **Dependencies**: Python `>= 3.12`, `jq`, Xcode Command Line Tools (`codesign`)
-- **Supported `agy` releases**: `v1.5.3`, `v1.5.5`, `v1.5.6`, `v1.5.7`, `v1.5.8`, `v1.5.9`
+- **macOS**: Apple Silicon (`darwin/arm64`), full patch set, `agy v1.5.3`–`v1.5.9`
+- **Windows**: `amd64` (native PE32+, not WSL), core long-conversation patches + prompt trimming + wrapper/statusline, `agy v1.5.9`
+- **Dependencies**: Python `>= 3.12`; macOS additionally needs `jq` and Xcode Command Line Tools (`codesign`); Windows needs no extra tools
 
 ---
 
@@ -72,6 +72,26 @@ python3 ~/.gemini/agy-patch/scripts/install.py --uninstall
 
 This restores `~/.local/bin/agy` from its `.orig` backup, removes the installed wrapper and statusline copy, cleans the managed `statusLine` entry, and strips the `# >>> agy-patch >>>` block from `~/.zshrc`.
 
+### Windows (amd64)
+
+Windows support is native (PE32+), not WSL. Ported: context-window presets for the Gemini 4 family, the 256K checkpoint ceiling, both 64K `USER_INPUT` clamps, prompt-template trimming, the auto-update guard, the cache relay, and a Python powerline statusline. The TUI/CoT rendering sites remain macOS/arm64-only; `--status -v` marks the PE site list and prints a note. The Windows patch is pinned to `agy v1.5.9` (`windows/amd64`); exact stock bytes live in [`site_shapes_windows.json`](site_shapes_windows.json), so another release fails closed instead of guessing.
+
+```powershell
+git clone https://github.com/wscffaa/agy-patch.git $HOME\.gemini\agy-patch
+python $HOME\.gemini\agy-patch\scripts\install.py --dry-run
+python $HOME\.gemini\agy-patch\scripts\install.py --set-window 512K
+```
+
+`install.py` looks for `%LOCALAPPDATA%\agy\bin\agy.exe` (agy's own Windows install target) and falls back to `%USERPROFILE%\.local\bin\agy.exe`; pass `--binary <path>` if yours is elsewhere. It writes `%USERPROFILE%\.gemini\bin\agy.cmd` + `agy_wrapper.py`, `%USERPROFILE%\.gemini\antigravity-cli\statusline.py`, and a managed block to the PowerShell profile (`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`, or the 5.1 profile when that exists). Open a new PowerShell window and run `agy --version`.
+
+Uninstall:
+
+```powershell
+python $HOME\.gemini\agy-patch\scripts\install.py --uninstall
+```
+
+The PE is modified in place, so its Authenticode signature is no longer valid. Windows runs it normally, but SmartScreen reputation may reset. Close any running `agy.exe` before `--apply`/`--uninstall`; the patcher reports a clear error if the file is locked.
+
 ---
 
 ## Safe Upgrade Workflow
@@ -99,13 +119,11 @@ If any anchor or stock shape fails, read [`docs/references/context-window-patch.
 
 | Path | Purpose |
 | :--- | :--- |
-| [`patch_agy.py`](patch_agy.py) | Primary version-adaptive ARM64 binary & template patcher (`--apply`, `--revert`, `--status`, `--accept-shapes`) |
-| [`site_shapes.json`](site_shapes.json) | Masked stock instruction shapes for every reviewed site (fail-closed guard against shifted offsets) |
-| [`runtime/`](runtime/agy-wrapper.sh) | Runtime wrapper (`agy-wrapper.sh`), cache keepalive relay (`cache_relay.py`), powerline bar (`statusline.sh`), optional `agy-gateway.env.example` |
-| [`tools/`](tools/probe_agy.py) | Upgrade rehearsal (`probe_agy.py`), release checker (`check_agy_update.py`), Mach-O inspector (`inspect_agy.py`), prompt capture & scrubbing (`capture_prompt.py`, `prompt_templates.py`) |
-| [`scripts/`](scripts/install.py) | Idempotent installer/uninstaller (`install.py`) and repo sustainability gate (`check_repo.py`) |
-| [`templates/`](templates/v1.5.9/README.md) | Per-release (`v1.5.3`–`v1.5.9`) stock templates, captured `PROMPT.md`/`tools.json`, desired overrides, and `prompt_overrides.json` |
-| [`integrations/`](integrations/consult_gemini_mcp.py) | Optional `consult_gemini` MCP stdio server + ACP Unix-socket Hub (`consult_gemini/`) |
+| [`patch_agy.py`](patch_agy.py) | Primary version-adaptive patcher: Mach-O/ARM64 TUI + prompt sites and PE/amd64 core + prompt sites (`--apply`, `--revert`, `--status`, `--accept-shapes`) |
+| [`site_shapes.json`](site_shapes.json) | Masked ARM64 stock instruction shapes for every reviewed site (fail-closed guard against shifted offsets) |
+| [`site_shapes_windows.json`](site_shapes_windows.json) | Exact PE/amd64 stock bytes and `.text` bounds for the Windows v1.5.9 sites |
+| [`runtime/`](runtime/agy-wrapper.sh) | Runtime wrappers (`agy-wrapper.sh`, `agy-wrapper.cmd` + `agy_wrapper.py`), cache keepalive relay (`cache_relay.py`), powerline bars (`statusline.sh`, `statusline.py`), optional `agy-gateway.env.example` |
+| [`tools/`](tools/probe_agy.py) | Upgrade rehearsal (`probe_agy.py`), release checker (`check_agy_update.py`), Mach-O inspector (`inspect_agy.py`), prompt capture & scrubbing (`capture_prompt.py`, `prompt_templates.py`), PE/amd64 resolver (`binfmt.py`, `win_amd64.py`) |
 | [`docs/`](docs/architecture.md) | Architecture overview, reverse-engineering references (`docs/references/`), and forensic diagnostics (`docs/diagnostics/`) |
 | [`tests/`](tests/test_repo_invariants.py) | Offline unit & repo-invariant test suite (`python3 -m unittest discover -s tests -v`) |
 
@@ -120,7 +138,7 @@ python3 ~/.gemini/agy-patch/scripts/check_repo.py
 python3 -m unittest discover -s ~/.gemini/agy-patch/tests -v
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull request across Linux and macOS.
+GitHub Actions (`.github/workflows/ci.yml`) runs both on every push and pull request across Linux, macOS, and Windows.
 
 ## License
 

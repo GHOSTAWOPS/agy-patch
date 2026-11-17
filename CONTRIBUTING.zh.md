@@ -2,7 +2,7 @@
 
 [English](CONTRIBUTING.md) | 中文
 
-`agy-patch` 面向闭源 Go Mach-O 二进制（`darwin/arm64`）。项目可持续性依赖**fail-closed 升级机制**：绝不把旧版本偏移量盲目套用到新版上游二进制上。
+`agy-patch` 面向闭源 Go 二进制：macOS 为 Mach-O/arm64，Windows 为 PE32+/amd64。项目可持续性依赖**fail-closed 升级机制**：绝不把旧版本偏移量盲目套用到新版上游二进制上。
 
 ## 升级到新版 `agy`
 
@@ -28,6 +28,16 @@
    python3 patch_agy.py --apply
    python3 patch_agy.py --status -v
    ```
+
+## Windows（amd64）版本
+
+Windows 补丁固定于 `agy v1.5.9`，精确原始字节记录在 `site_shapes_windows.json`。升级新版本时：
+
+1. 从 updater manifest 下载 `cli_windows_x64.exe` 并校验 SHA-512。
+2. 执行 `python patch_agy.py --status --binary <new.exe> -v`；`.text` 大小或任一位点原始字节不匹配都会 fail-closed。
+3. 对照 Go `pclntab` 函数名审查变化字节，确认指令语义后再更新 `tools/win_amd64.py` 的 `STOCK` 与 `site_shapes_windows.json`。
+4. 在副本上打补丁，验证 `agy --version`、`agy models` 与 ACP `initialize` 握手后再改动已安装 PE。
+5. TUI/CoT 位点尚未移植；不要在文档或 `--status` 中声称完全对等。
 
 ## 提交 PR 前自检
 

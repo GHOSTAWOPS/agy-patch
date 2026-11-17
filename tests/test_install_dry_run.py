@@ -5,6 +5,7 @@ from __future__ import annotations
 import pathlib
 import tempfile
 import unittest
+import unittest.mock
 
 from scripts import install
 
@@ -64,6 +65,45 @@ class InstallHelpersTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertFalse((home / ".zshrc").exists())
             self.assertFalse((home / ".gemini/antigravity-cli/settings.json").exists())
+
+    def test_powershell_block_is_idempotent(self) -> None:
+        initial = '$env:PATH = "C:\\Tools;$env:PATH"\n'
+        once, state1 = install.upsert_powershell_block(initial)
+        self.assertEqual(state1, "added")
+        twice, state2 = install.upsert_powershell_block(once)
+        self.assertEqual(state2, "unchanged")
+        self.assertEqual(once, twice)
+        cleaned, removed = install.remove_powershell_block(twice)
+        self.assertTrue(removed)
+        self.assertEqual(cleaned, initial)
+
+    def test_remove_statusline_accepts_a_windows_command(self) -> None:
+        target = pathlib.Path("C:/Users/example/.gemini/antigravity-cli/statusline.py")
+        existing = {"statusLine": {"type": "command", "command": f'"python.exe" -I "{target}"'}}
+        cleaned, changed = install.remove_statusline_if_managed(existing, "unused", target)
+        self.assertTrue(changed)
+        self.assertNotIn("statusLine", cleaned)
+
+    @unittest.skipUnless(install.IS_WINDOWS, "Windows-specific paths")
+    def test_windows_dry_run_makes_zero_disk_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp)
+            fake_bin = home / "agy.exe"
+            fake_bin.write_bytes(b"MZ")
+            with unittest.mock.patch.object(install, "check_prerequisites", return_value=([], "1.5.9")):
+                rc = install.main(
+                    [
+                        "--dry-run",
+                        "--home",
+                        str(home),
+                        "--binary",
+                        str(fake_bin),
+                        "--force-platform",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertFalse((home / ".gemini").exists())
+            self.assertFalse((home / "Documents").exists())
 
 
 if __name__ == "__main__":
