@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Antigravity CLI wrapper (native Google OAuth + prompt cache keepalive relay; no local gateway)
+# Antigravity CLI wrapper (native Google OAuth + prompt cache keepalive relay; no local gateway).
+# The Windows sibling is runtime/agy_wrapper.py behind runtime/agy-wrapper.cmd.
 # Delegates binary execution to the single patched Mach-O binary at ~/.local/bin/agy.
 
 # Never let a background update replace the patched binary. Extension-spawned processes
