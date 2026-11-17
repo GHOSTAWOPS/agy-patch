@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-面向 Google Antigravity CLI（`agy`）的版本自适应二进制补丁、提示词缓存保活包装器、Powerline 状态栏与升级预演工具链：macOS/arm64 提供完整能力，Windows/amd64 提供核心长对话能力。
+面向 Google Antigravity CLI（`agy`）的 fail-closed 二进制补丁、缓存中继、Powerline 状态栏与升级预演工具链：macOS/arm64 提供完整补丁集，Windows/amd64 目前为部分验证的实验性移植。
 
 > **设计动机：** 官方每次升级 `agy` 都会替换单个闭源 Go Mach-O 二进制（`~/.local/bin/agy`），直接覆盖本地改动。`agy-patch` 将补丁锚定在 Go `pclntab` 符号与指令形态上，写字节前先做 fail-closed 形态校验，通过隔离沙箱预演（`rehearse`）验证新版本，并把二进制补丁、运行时包装器与系统提示词模板解耦管理。
 
@@ -10,20 +10,20 @@
 
 ## 核心能力
 
-- **上下文窗口与 Checkpointer 解锁**（`patch_agy.py`）：在 Gemini 4 Argon / Carbon / Hydrogen 上解锁 `/model` `Tab` 上下文档位（`256K` / `512K` / `900K`），解除 >256K checkpoint 上限与 64K `USER_INPUT` 步级截断，修正状态栏 token 分母与 15 秒空闲刷新。
+- **上下文窗口与 Checkpointer 解锁**（`patch_agy.py`）：macOS 补丁在 Gemini 4 Argon / Carbon / Hydrogen 上解锁 `/model` `Tab` 档位（`256K` / `512K` / `900K`）、解除 checkpoint 与 `USER_INPUT` 限制，并修正状态栏分母与 15 秒空闲刷新。Windows 代码包含上下文、checkpoint 和输入限制的候选补丁，目标功能仍需端到端验证。
 - **TUI 与 CoT 可读性增强**（macOS/arm64）：保留完整多行 `∴ Thought...` 思考块（`medium` 详略度下实时单行预览，`high` 下流式完整展开）、原生终端 `Faint` + `Italic` 排版、语义 ANSI `"terminal"` 调色板、自适应明暗（DEC 2031）全宽输入栏以及呼吸态 Gemini 星标等待行。
 - **系统提示词精简**（`templates/v<ver>/`）：逐字节校验内嵌 `system_prompts/*.tmpl` 槽位，并在 `prompt_overrides.json` 中强制记录每项改动的理由。
 - **提示词缓存保活中继**（`runtime/agy-wrapper.sh` / `runtime/agy_wrapper.py` + `runtime/cache_relay.py`）：禁止后台静默自动更新（`AGY_CLI_DISABLE_AUTO_UPDATE=true`），并在交互式与 `acp` 会话空闲期间保活 5 分钟隐式缓存（设置 `AGY_CACHE_RELAY=off` 可关闭）。
 - **Pastel Powerline 状态栏**（`runtime/statusline.sh` / `runtime/statusline.py`）：渲染上下文占比、token 统计、单步延迟/TPS、配额及缓存保活状态（`↻`、`↻n`、`✗`）。Windows 版本为无第三方依赖的 Python 实现。
-- **Fail-Closed 升级预演**（`tools/probe_agy.py`）：在临时目录下载并校验新版本 SHA-512，解析全部分组位点、核对指令形态（`site_shapes.json`），并在回环端点 + PTY 下验证线缆请求与 TUI 界面，确认无误后再动线上二进制。
-- **可选 ACP MCP Hub**（`integrations/consult_gemini/`）：零依赖 MCP stdio 服务 + 单例 Unix Socket Hub，使 Claude Code 等外部客户端可通过常驻 `agy acp` 发起只读 `consult_gemini` 咨询并读取精确 SQLite 用量遥测。
+- **Fail-Closed 升级预演**（`tools/probe_agy.py`）：下载并校验 SHA-512、解析位点并修补隔离副本。macOS 还执行请求与 PTY 界面探测；Windows 预演仅验证字节与启动，不证明模型请求、长输入或 TUI 功能正常。
+- **可选 ACP MCP Hub**（`integrations/consult_gemini/`，仅 POSIX）：零依赖 MCP stdio 服务 + 单例 Unix Socket Hub。此 Hub 尚未移植到 Windows。
 
 ---
 
 ## 环境要求与支持版本
 
 - **macOS**：Apple Silicon（`darwin/arm64`），完整补丁集，`agy v1.5.3`–`v1.5.9`
-- **Windows**：`amd64`（原生 PE32+，非 WSL），核心长对话补丁 + 提示词裁剪 + 包装器/状态栏，`agy v1.5.9`
+- **Windows**：面向 `agy v1.5.9` 的实验性 `amd64` PE32+ 移植，包含安装器、包装器/状态栏、提示词裁剪与候选长对话补丁；尚未达到 macOS 功能对等。
 - **依赖工具**：Python `>= 3.12`；macOS 另需 `jq` 与 Xcode Command Line Tools（`codesign`）；Windows 无需额外工具
 
 ---
@@ -74,7 +74,9 @@ python3 ~/.gemini/agy-patch/scripts/install.py --uninstall
 
 ### Windows（amd64）
 
-Windows 为原生 PE32+ 支持，不依赖 WSL。已移植：Gemini 4 家族上下文窗口、256K checkpoint 上限、两处 64K `USER_INPUT` 截断、提示词模板裁剪、自动更新保护、缓存保活中继与 Python Powerline 状态栏。TUI/CoT 渲染位点仍仅支持 macOS/arm64；`--status -v` 会标注 PE 位点并给出提示。Windows 补丁固定于 `agy v1.5.9`（`windows/amd64`），原始字节记录在 [`site_shapes_windows.json`](site_shapes_windows.json)，其他版本会 fail-closed 而不是猜测。
+Windows 移植面向原生 PE32+ `agy v1.5.9`（`windows/amd64`），包含 Gemini 4 上下文选择、checkpoint 与 `USER_INPUT` 限制的候选补丁，以及提示词裁剪、自动更新保护、缓存中继和 Python 状态栏。位点解析、`--version`、模型列表或 ACP 初始化成功，**不代表被修改的功能路径已经验证**。已登录环境中的 `/model` 选择、真实长输入与 checkpoint 行为仍未验证。
+
+Windows 尚未具备：TUI/CoT 渲染改动、CLI 上下文窗口分母修正、15 秒空闲界面刷新，以及可选 Unix Socket MCP Hub。Python 状态栏使用 agy 提供的遥测，无法修正上游错误的分母。[`site_shapes_windows.json`](site_shapes_windows.json) 的版本字节守卫能拒绝不受支持的版本，但不能证明机器码补丁的语义正确。
 
 ```powershell
 git clone https://github.com/wscffaa/agy-patch.git $HOME\.gemini\agy-patch
@@ -90,7 +92,7 @@ python $HOME\.gemini\agy-patch\scripts\install.py --set-window 512K
 python $HOME\.gemini\agy-patch\scripts\install.py --uninstall
 ```
 
-PE 为原地修改，Authenticode 签名会失效；Windows 仍可正常运行，但 SmartScreen 信誉可能重置。执行 `--apply`/`--uninstall` 前请关闭正在运行的 `agy.exe`；文件被占用时补丁器会给出明确错误。
+修改已签名 PE 会使 Authenticode 签名失效，能否运行还取决于本机应用控制策略。执行 `--apply`/`--uninstall` 前请关闭正在运行的 `agy.exe`；文件被占用时补丁器会报告替换错误。
 
 ---
 
@@ -140,6 +142,8 @@ python3 -m unittest discover -s ~/.gemini/agy-patch/tests -v
 ```
 
 GitHub Actions（`.github/workflows/ci.yml`）会在每次 push / PR 时在 Linux、macOS 与 Windows 上自动执行上述门禁与测试。
+
+普通测试不会下载或运行 Google 二进制。`AGY_WINDOWS_BINARY` 仅启用可选位点解析检查，不是长对话功能测试；测试报告应分别列出通过和跳过数量。
 
 ## 许可证
 

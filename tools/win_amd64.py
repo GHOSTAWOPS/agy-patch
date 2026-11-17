@@ -50,22 +50,31 @@ TARGET_SYMBOLS = {
     "stepToMessage": "google3/third_party/oneharness/internal/core/serializers/serializers.DefaultSerializer.stepToMessage",
 }
 
-# Reviewed stock bytes for v1.5.9. These are the fail-closed guard: a release that
-# moved any instruction produces a mismatch instead of a patch on top of unknown code.
-STOCK = {
-    "ContextWindow": {
-        "miss": "48c7c0ffffffff4885c0",
-        "choice": "488b8c2408010000488b4958904885c9",
-    },
-    "offersContextWindow": {
-        "miss": "48c7c0ffffffff4885c0",
-        "return_true": "488b9424f03d0000488b",
-    },
-    "GetCheckpointConfig": {"ceiling": "be00e80300"},
-    "applyFeatureProviderCheckpointOverrideConfig": {"zero": "488b5c2440"},
-    "getMaxTokensForStep": {"je": "7405", "jne": "7526"},
-    "stepToMessage": {"user_input": "7554"},
-}
+# The reviewed stock bytes live only in site_shapes_windows.json. These are the
+# exact site keys the resolver consumes; a missing or malformed entry fails closed.
+SITE_CW_CHOICE = "store.(*Store).ContextWindow -> (*Store).ContextWindowChoice"
+SITE_CW_MISS = "store.(*Store).ContextWindow -> whitelist miss enters Gemini 4 matcher"
+SITE_OCW_RETURN_TRUE = "model.SelectorModel.offersContextWindow -> return true"
+SITE_OCW_MISS = "model.SelectorModel.offersContextWindow -> whitelist miss enters Gemini 4 matcher"
+SITE_CHECKPOINT_CEILING = "utils.GetCheckpointConfig -> remove 256K (0x3e800) ceiling"
+SITE_CHECKPOINT_ZERO = "config.applyFeatureProviderCheckpointOverrideConfig -> zero expCp.MaxTokenLimit"
+SITE_USER_INPUT_JE = "chatconverters.(*TrajectoryChatConverter).getMaxTokensForStep -> disable 64K USER_INPUT clamp"
+SITE_USER_INPUT_JNE = (
+    "chatconverters.(*TrajectoryChatConverter).getMaxTokensForStep -> disable 64K USER_INPUT clamp (fallthrough)"
+)
+SITE_STEP_USER_INPUT = "serializers.DefaultSerializer.stepToMessage -> route STEP_TYPE_USER_INPUT (0xe) to unlimited branch"
+
+STOCK_SITE_NAMES = (
+    SITE_CW_CHOICE,
+    SITE_CW_MISS,
+    SITE_OCW_RETURN_TRUE,
+    SITE_OCW_MISS,
+    SITE_CHECKPOINT_CEILING,
+    SITE_CHECKPOINT_ZERO,
+    SITE_USER_INPUT_JE,
+    SITE_USER_INPUT_JNE,
+    SITE_STEP_USER_INPUT,
+)
 
 PATCH = {
     "GetCheckpointConfig": {"ceiling": "89d6909090"},  # mov esi, edx; nops
@@ -208,13 +217,47 @@ def _load_shapes(version: str) -> dict:
             f"got v{version}. Rehearse the release and review site_shapes_windows.json first."
         )
     try:
-        shapes = json.loads(SHAPES_PATH.read_text())
-    except FileNotFoundError:
-        raise RuntimeError(f"missing {SHAPES_PATH.name}")
-    for key in (version, f"v{version}"):
-        if key in shapes:
-            return shapes[key]
-    raise RuntimeError(f"{SHAPES_PATH.name} has no reviewed shapes for v{version}")
+        raw = SHAPES_PATH.read_text()
+    except (OSError, UnicodeError) as exc:
+        raise RuntimeError(f"cannot read {SHAPES_PATH.name}: {exc}") from exc
+    try:
+        shapes = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{SHAPES_PATH.name} is not valid JSON: {exc}") from exc
+    if not isinstance(shapes, dict):
+        raise RuntimeError(f"{SHAPES_PATH.name} must hold an object keyed by release")
+    spec = next((shapes[key] for key in (version, f"v{version}") if key in shapes), None)
+    if spec is None:
+        raise RuntimeError(f"{SHAPES_PATH.name} has no reviewed shapes for v{version}")
+    if not isinstance(spec, dict):
+        raise RuntimeError(f"{SHAPES_PATH.name} entry for v{version} is not an object")
+    for field in ("text_vsize", "text_raw_size"):
+        value = spec.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise RuntimeError(f"{SHAPES_PATH.name} has no valid {field} for v{version}")
+    if spec["text_raw_size"] - CAVE_SIZE < spec["text_vsize"]:
+        raise RuntimeError(
+            f"{SHAPES_PATH.name}: v{version} .text raw size leaves less than the {CAVE_SIZE:#x}-byte cave"
+        )
+    sites = spec.get("sites")
+    if not isinstance(sites, dict):
+        raise RuntimeError(f"{SHAPES_PATH.name} has no reviewed sites for v{version}")
+    for name in STOCK_SITE_NAMES:
+        value = sites.get(name)
+        if not isinstance(value, str) or not value:
+            raise RuntimeError(f"{SHAPES_PATH.name} is missing reviewed stock bytes for {name} (v{version})")
+        try:
+            stock = bytes.fromhex(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{SHAPES_PATH.name} has malformed reviewed stock bytes for {name}: {value!r}") from exc
+        if not stock:
+            raise RuntimeError(f"{SHAPES_PATH.name} has empty reviewed stock bytes for {name} (v{version})")
+    return spec
+
+
+def _stock(spec: dict, name: str) -> bytes:
+    """The reviewed stock bytes for one site; `_load_shapes` has already validated them."""
+    return bytes.fromhex(spec["sites"][name])
 
 
 def _locate_pclntab(image: PEImage) -> tuple[int, int, int, int]:
@@ -357,8 +400,7 @@ def resolve_patch_sites(data: bytes | bytearray, version: str, strict: bool = Fa
     cave_patched = cave_bytes + b"\xcc" * (CAVE_SIZE - len(cave_bytes))
     _checked(cave_actual, cave_stock, cave_patched, "PE .text amd64 cave", strict)
 
-    def site(domain: str, name: str, va: int, stock_hex: str, patched: bytes) -> Site:
-        stock = bytes.fromhex(stock_hex)
+    def site(domain: str, name: str, va: int, stock: bytes, patched: bytes) -> Site:
         if len(patched) > len(stock):
             raise RuntimeError(f"{name}: patch is {len(patched)}B but stock is {len(stock)}B")
         patched = patched + b"\x90" * (len(stock) - len(patched))
@@ -405,65 +447,65 @@ def resolve_patch_sites(data: bytes | bytearray, version: str, strict: bool = Fa
         Site("pe", "PE .text padding -> amd64 patch cave", cave_va, cave_offset, cave_stock, cave_patched),
         site(
             "context-window",
-            "store.(*Store).ContextWindow -> (*Store).ContextWindowChoice",
+            SITE_CW_CHOICE,
             cw_va + 0x125,
-            STOCK["ContextWindow"]["choice"],
+            _stock(spec, SITE_CW_CHOICE),
             choice.finish(),
         ),
         site(
             "context-window",
-            "store.(*Store).ContextWindow -> whitelist miss enters Gemini 4 matcher",
+            SITE_CW_MISS,
             cw_va + 0xC9,
-            STOCK["ContextWindow"]["miss"],
+            _stock(spec, SITE_CW_MISS),
             cw_miss.finish(),
         ),
         site(
             "context-window",
-            "model.SelectorModel.offersContextWindow -> return true",
+            SITE_OCW_RETURN_TRUE,
             ocw_va + 0x8B,
-            STOCK["offersContextWindow"]["return_true"],
+            _stock(spec, SITE_OCW_RETURN_TRUE),
             ocw_true.finish(),
         ),
         site(
             "context-window",
-            "model.SelectorModel.offersContextWindow -> whitelist miss enters Gemini 4 matcher",
+            SITE_OCW_MISS,
             ocw_va + 0x1CE,
-            STOCK["offersContextWindow"]["miss"],
+            _stock(spec, SITE_OCW_MISS),
             ocw_miss.finish(),
         ),
         site(
             "context-window",
-            "utils.GetCheckpointConfig -> remove 256K (0x3e800) ceiling",
+            SITE_CHECKPOINT_CEILING,
             cp_va + 0x128,
-            STOCK["GetCheckpointConfig"]["ceiling"],
+            _stock(spec, SITE_CHECKPOINT_CEILING),
             bytes.fromhex(PATCH["GetCheckpointConfig"]["ceiling"]),
         ),
         site(
             "context-window",
-            "config.applyFeatureProviderCheckpointOverrideConfig -> zero expCp.MaxTokenLimit",
+            SITE_CHECKPOINT_ZERO,
             ap_va + 0x100,
-            STOCK["applyFeatureProviderCheckpointOverrideConfig"]["zero"],
+            _stock(spec, SITE_CHECKPOINT_ZERO),
             checkpoint.finish(),
         ),
         site(
             "context-window",
-            "chatconverters.(*TrajectoryChatConverter).getMaxTokensForStep -> disable 64K USER_INPUT clamp",
+            SITE_USER_INPUT_JE,
             gm_va + 0x43,
-            STOCK["getMaxTokensForStep"]["je"],
+            _stock(spec, SITE_USER_INPUT_JE),
             bytes.fromhex(PATCH["getMaxTokensForStep"]["je"]),
         ),
         site(
             "context-window",
-            "chatconverters.(*TrajectoryChatConverter).getMaxTokensForStep -> disable 64K USER_INPUT clamp (fallthrough)",
+            SITE_USER_INPUT_JNE,
             gm_va + 0x48,
-            STOCK["getMaxTokensForStep"]["jne"],
+            _stock(spec, SITE_USER_INPUT_JNE),
             bytes.fromhex(PATCH["getMaxTokensForStep"]["jne"]),
         ),
         site(
             "context-window",
-            "serializers.DefaultSerializer.stepToMessage -> route STEP_TYPE_USER_INPUT (0xe) to unlimited branch",
+            SITE_STEP_USER_INPUT,
             st_va + 0x2A3,
-            STOCK["stepToMessage"]["user_input"],
+            _stock(spec, SITE_STEP_USER_INPUT),
             bytes.fromhex(PATCH["stepToMessage"]["user_input"]),
         ),
     ]

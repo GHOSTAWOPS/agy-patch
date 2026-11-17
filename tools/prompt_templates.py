@@ -27,14 +27,22 @@ import json
 import os
 import pathlib
 import struct
+import sys
 from typing import NamedTuple
+
+# `python tools/prompt_templates.py` puts only tools/ on sys.path; `python -I`
+# puts neither tools/ nor the repository there. Add the repository explicitly so
+# the script works both ways and as `tools.prompt_templates` after a normal import.
+REPO = pathlib.Path(__file__).resolve().parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 
 from tools.binfmt import PEImage, detect_image
 
 VM_BASE = 0x100000000  # Mach-O compatibility alias; address translation goes through detect_image()
 TEMPLATE_ROOT = b"google3/third_party/jetski/prompt/template_provider/templates/"
 TEMPLATE_DIR = TEMPLATE_ROOT + b"system_prompts/"
-TEMPLATES_ROOT = pathlib.Path(__file__).resolve().parent.parent / "templates"  # one v<version>/ directory per agy release
+TEMPLATES_ROOT = REPO / "templates"  # one v<version>/ directory per agy release
 
 
 class TemplateSlot(NamedTuple):

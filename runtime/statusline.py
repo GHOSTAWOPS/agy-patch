@@ -5,7 +5,9 @@
 version (`statusline.sh`) is a zsh/jq implementation for macOS; this file is the
 Windows runtime and a portable fallback. It keeps the same telemetry contract:
 context usage, per-step latency/TPS, quota, subagents/tasks, and the relay's
-cache countdown (`<tempdir>/agy_cache_<session>.dat`).
+cache countdown (`/tmp` on POSIX, the native temp dir on Windows). The relay
+schedules idle touches itself, so this statusline only renders the relay's
+state; it never POSTs.
 
 No third-party packages. Any parse failure prints a compact fallback instead of
 breaking the CLI's status line.
@@ -21,7 +23,13 @@ import sys
 import tempfile
 import time
 
-STATE_DIR = pathlib.Path(os.environ.get("AGY_CACHE_RELAY_DIR") or tempfile.gettempdir())
+
+def default_state_dir(platform: str = os.name) -> pathlib.Path:
+    """Shared /tmp on POSIX (statusline.sh reads it); the native temp dir on Windows."""
+    return pathlib.Path(tempfile.gettempdir() if platform == "nt" else "/tmp")
+
+
+STATE_DIR = pathlib.Path(os.environ.get("AGY_CACHE_RELAY_DIR") or default_state_dir())
 try:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 except OSError:

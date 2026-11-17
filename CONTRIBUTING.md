@@ -35,9 +35,9 @@ Windows patches are pinned to `agy v1.5.9` in `site_shapes_windows.json`. For a 
 
 1. Download `cli_windows_x64.exe` from the updater manifest and verify its SHA-512.
 2. Run `python patch_agy.py --status --binary <new.exe> -v`; a changed `.text` size or any stock-byte mismatch fails closed.
-3. Review the changed function bytes (Go `pclntab` names are identical across platforms), update `STOCK` in `tools/win_amd64.py` only after the instruction shapes are understood, and record the new `.text` bounds and bytes in `site_shapes_windows.json`.
-4. Patch a copy, then verify `agy --version`, `agy models`, and an ACP `initialize` handshake before touching the installed PE.
-5. The TUI/CoT sites are not ported; do not claim parity in docs or `--status` output.
+3. Review the changed function bodies, branch destinations, register/stack contracts, and patch instruction semantics before updating `tools/win_amd64.py` or the authoritative stock-byte entries in `site_shapes_windows.json`. Matching a short instruction prefix alone is not a behavioral proof.
+4. Patch an isolated copy. `--version`, `models`, and ACP `initialize` are startup/protocol smoke checks only. Verify `/model` + Tab, the transmitted checkpoint limit, preservation of inputs above 64K, and idle cache replay separately before recommending installation. Windows rehearsal reports incomplete behavioral coverage when wire/screens are skipped.
+5. Windows TUI/CoT rendering, corrected context denominators, 15-second idle UI refresh, and the optional Unix-socket MCP Hub are not ported. Keep the PR experimental until the required behavior has evidence; do not infer parity from passing unit tests.
 
 ## Before Opening a PR
 

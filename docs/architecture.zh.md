@@ -27,7 +27,7 @@
 2. **二进制修补（`patch_agy.py --apply`）**：首次运行时将 `~/.local/bin/agy` 备份为 `agy.v<ver>.orig`，解析全部 ARM64 位点与 `templates/v<ver>/system_prompts/` 覆盖，对照 `site_shapes.json` 拒绝未审查形态，写入临时文件并执行 `codesign -f -s -`，原子替换 `~/.local/bin/agy` 后同步 `runtime/agy-wrapper.sh` 与 `runtime/statusline.sh`。
 3. **交互执行（`~/.gemini/bin/agy`）**：`runtime/agy-wrapper.sh` 导出 `AGY_CLI_DISABLE_AUTO_UPDATE=true`，为交互式与 `acp` 会话拉起 `runtime/cache_relay.py` 并注入 `CLOUD_CODE_URL`，再 `exec` 调用 `~/.local/bin/agy`。
 4. **Windows 安装（`scripts/install.py` + `runtime/agy_wrapper.py`）**：校验 `Windows/amd64` 与 Python，从 `agy.exe.v<ver>.orig` 修补 `%LOCALAPPDATA%\agy\bin\agy.exe`，安装 `%USERPROFILE%\.gemini\bin\agy.cmd` + `agy_wrapper.py`，合并 `statusLine`/`contextWindow`，并在 PowerShell 配置中写入托管块。包装器定位 PE，为交互式/`acp` 会话启动中继，并等待 agy 结束以停止中继。
-5. **升级预演（`tools/probe_agy.py rehearse`）**：在临时目录下载并校验新版 SHA-512，脚手架化 `templates/v<new>/`，解析全部位点分组、标记新增指令形态，并通过回环 `wire` 与 PTY `tui` 探测验证行为后再决定是否升级本机二进制。
+5. **升级预演（`tools/probe_agy.py rehearse`）**：下载并校验 SHA-512，在不删除用户提供的干净备份的前提下暂存副本、解析并应用已支持的位点。macOS 路径还执行回环 `wire` 与 PTY `tui` 探测；Windows 路径只检查字节守卫与启动，跳过行为探测意味着功能验证仍不完整。
 
 ## 扩展点
 

@@ -4044,8 +4044,9 @@ def print_status(binaries: list[pathlib.Path], verbose: bool = False) -> None:
         if verbose and sites:
             for idx, s in enumerate(sites, 1):
                 print(f"  [{idx:02d}] [{s.domain}] {hex(s.va)} (off {hex(s.offset)}): {s.name} [{len(s.patched)}B]")
-            if any(s.domain == "pe" for s in sites):
-                print("  [note] windows/amd64: core context/checkpoint/clamp + prompt sites; TUI/CoT sites are macOS-only")
+        if any(s.domain == "pe" for s in sites):
+            print("  [note] Experimental Windows/amd64 patch: byte state only; feature behavior is unverified.")
+            print("         TUI/CoT, corrected context denominators, 15s idle UI refresh, and the optional MCP Hub are not ported.")
     if SETTINGS_PATH.exists():
         settings = json.loads(SETTINGS_PATH.read_text())
         print(f"Settings : {SETTINGS_PATH} -> model={settings.get('model')!r}, contextWindow={settings.get('contextWindow')!r}")

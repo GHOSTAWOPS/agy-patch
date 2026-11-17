@@ -52,13 +52,20 @@ def check_python_compile() -> list[str]:
 def check_shell_syntax() -> list[str]:
     zsh = shutil.which("zsh")
     if not zsh:
+        print("[skip] Shell syntax: zsh is not installed.", file=sys.stderr)
         return []
     try:
         probe = subprocess.run([zsh, "--version"], capture_output=True, text=True, timeout=10)
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        if sys.platform != "win32":
+            return [f"could not run zsh: {exc}"]
+        print(f"[skip] Shell syntax: zsh could not run ({exc}).", file=sys.stderr)
         return []
     if probe.returncode != 0:
-        return []  # a broken zsh (e.g. a DLL mismatch in Git for Windows) is not a repo defect
+        if sys.platform != "win32":
+            return [f"zsh --version failed with exit code {probe.returncode}"]
+        print(f"[skip] Shell syntax: installed zsh failed with exit code {probe.returncode}.", file=sys.stderr)
+        return []
     errors: list[str] = []
     for sh in sorted((REPO / "runtime").glob("*.sh")):
         # Windows checkouts can carry CRLF; zsh -n rejects the CR before the newline.
@@ -235,7 +242,7 @@ def main() -> int:
         for err in errors:
             print(f"[FAIL] {err}", file=sys.stderr)
         return 1
-    print("[ok] All repository sustainability and privacy checks passed.")
+    print("[ok] Available repository checks passed; any unavailable checks are listed as [skip].")
     return 0
 
 

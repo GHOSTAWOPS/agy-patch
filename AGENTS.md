@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`agy-patch` is a fail-closed, version-adaptive binary patcher, prompt-cache keepalive wrapper, statusline, and upgrade-rehearsal harness for Google Antigravity CLI (`agy`). macOS/arm64 gets the full Mach-O patch set; Windows/amd64 gets the PE core set. Read [docs/architecture.md](docs/architecture.md) before changing source code.
+`agy-patch` is a fail-closed binary patcher, prompt-cache relay, statusline, and upgrade-rehearsal harness for Google Antigravity CLI (`agy`). macOS/arm64 has the full Mach-O patch set; Windows/amd64 is an experimental PE port with unverified long-conversation behavior. Read [docs/architecture.md](docs/architecture.md) before changing source code.
 
 ## Repository layout
 
@@ -31,9 +31,10 @@ python3 tools/probe_agy.py rehearse       # Isolated upgrade rehearsal against a
 ## Hard invariants
 
 - **Never mutate `.orig` backups**: `patch_agy.py --apply` always rebuilds `~/.local/bin/agy` from `~/.local/bin/agy.v<ver>.orig`.
-- **Always re-sign modified Mach-O binaries**: run `codesign -f -s -` after patching on `darwin/arm64`. PE builds are not re-signed; their Authenticode signature is invalidated by design, and the patcher updates no signature table.
+- **Always re-sign modified Mach-O binaries**: run `codesign -f -s -` after patching on `darwin/arm64`. PE builds are not re-signed; modifying a signed PE invalidates Authenticode, and local policy may prevent execution.
 - **Windows sites are pinned by exact bytes**: `tools/win_amd64.py` refuses a binary whose `.text` bounds or any reviewed byte differ from `site_shapes_windows.json`. Never widen a guard to make a new release pass; review the new bytes first.
 - **Close agy before Windows apply/uninstall**: the PE is replaced atomically, and a running `agy.exe` locks the file.
 - **Fail closed on shifted instructions**: never bypass `site_shapes.json` verification without inspecting diffs via `python3 tools/probe_agy.py sites <old.orig> <new.orig>` and reading [`docs/references/context-window-patch.md` §5](docs/references/context-window-patch.md#5-authoring-pitfalls).
 - **Keep tests offline and quota-free**: unit tests under `tests/` must not make live upstream API calls or mutate user `$HOME`.
+- **Distinguish smoke checks from feature proof**: byte resolution, `--version`, model listing, and ACP initialization do not validate context limits, truncation, or idle cache reuse. Report skipped behavior probes and unavailable ports explicitly.
 - **Never commit secrets or unredacted user context**: keep `.cache/`, `~/.gemini/agy-gateway.env`, user rules, personal skills, and configured MCP lists out of tracked files.

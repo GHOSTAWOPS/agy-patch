@@ -35,9 +35,9 @@ Windows 补丁固定于 `agy v1.5.9`，精确原始字节记录在 `site_shapes_
 
 1. 从 updater manifest 下载 `cli_windows_x64.exe` 并校验 SHA-512。
 2. 执行 `python patch_agy.py --status --binary <new.exe> -v`；`.text` 大小或任一位点原始字节不匹配都会 fail-closed。
-3. 对照 Go `pclntab` 函数名审查变化字节，确认指令语义后再更新 `tools/win_amd64.py` 的 `STOCK` 与 `site_shapes_windows.json`。
-4. 在副本上打补丁，验证 `agy --version`、`agy models` 与 ACP `initialize` 握手后再改动已安装 PE。
-5. TUI/CoT 位点尚未移植；不要在文档或 `--status` 中声称完全对等。
+3. 审查函数体、跳转目标、寄存器/栈约定与补丁指令语义后，再更新 `tools/win_amd64.py` 或 `site_shapes_windows.json` 中唯一权威的原始字节。短指令前缀匹配不能证明功能正确。
+4. 在隔离副本上打补丁。`--version`、`models` 和 ACP `initialize` 仅是启动/协议冒烟检查。推荐安装前，还需分别验证 `/model` + Tab、实际请求中的 checkpoint 限制、超过 64K 输入的保留与空闲缓存重放。Windows 预演跳过 wire/screens 时必须报告功能验证不完整。
+5. Windows 尚未移植 TUI/CoT、上下文分母修正、15 秒空闲界面刷新和可选 Unix Socket MCP Hub。必要行为有证据前应保留实验性标记，不可从单元测试通过推断功能对等。
 
 ## 提交 PR 前自检
 

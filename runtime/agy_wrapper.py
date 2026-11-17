@@ -14,6 +14,7 @@ import pathlib
 import subprocess
 import sys
 import threading
+from collections.abc import Mapping
 
 DISABLE_AUTO_UPDATE = "AGY_CLI_DISABLE_AUTO_UPDATE"
 PRINT_ONLY = {"-p", "--print", "--prompt", "--login", "--help", "-h"}
@@ -59,12 +60,53 @@ def wants_relay(args: list[str]) -> bool:
     return False
 
 
+def gemini_upstream(env: Mapping[str, str]) -> str:
+    """The real Gemini base for non-/v1internal paths.
+
+    A nested agy inherits its parent's relay as GOOGLE_GEMINI_BASE_URL; that URL is not an
+    upstream. The parent records the original endpoint in AGY_GEMINI_UPSTREAM.
+    """
+    upstream = env.get("GOOGLE_GEMINI_BASE_URL") or ""
+    if upstream and upstream == (env.get("AGY_CACHE_RELAY") or ""):
+        upstream = env.get("AGY_GEMINI_UPSTREAM") or ""
+    return upstream
+
+
+def relay_command(script: pathlib.Path, env: Mapping[str, str],
+                  parent: int | None = None) -> list[str]:
+    command = [sys.executable, "-I", str(script), "--parent",
+               str(os.getpid() if parent is None else parent)]
+    upstream = gemini_upstream(env)
+    if upstream:
+        command += ["--gemini-upstream", upstream]
+    return command
+
+
+def relay_environment(env: Mapping[str, str], relay_url: str) -> dict[str, str]:
+    """Child environment for agy after the relay starts.
+
+    Gemini-provider traffic must stay on its real upstream: pointing it at this relay without
+    an upstream would make the relay send /v1beta paths to Cloud Code.
+    """
+    result = dict(env)
+    inherited_relay = env.get("AGY_CACHE_RELAY") or ""
+    upstream = gemini_upstream(env)
+    result["AGY_CACHE_RELAY"] = relay_url
+    result["CLOUD_CODE_URL"] = relay_url
+    if upstream:
+        result["AGY_GEMINI_UPSTREAM"] = upstream
+        result["GOOGLE_GEMINI_BASE_URL"] = relay_url
+    else:
+        result.pop("AGY_GEMINI_UPSTREAM", None)
+        if inherited_relay and env.get("GOOGLE_GEMINI_BASE_URL") == inherited_relay:
+            # The inherited value names the parent relay, not a Gemini endpoint.
+            result.pop("GOOGLE_GEMINI_BASE_URL", None)
+    return result
+
+
 def start_relay(script: pathlib.Path) -> tuple[subprocess.Popen[str], int] | None:
     env = os.environ.copy()
-    upstream = env.get("GOOGLE_GEMINI_BASE_URL")
-    command = [sys.executable, "-I", str(script), "--parent", str(os.getpid())]
-    if upstream and upstream != env.get("AGY_CACHE_RELAY"):
-        command += ["--gemini-upstream", upstream]
+    command = relay_command(script, env)
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     try:
         relay = subprocess.Popen(
@@ -98,18 +140,13 @@ def main(argv: list[str]) -> int:
     env[DISABLE_AUTO_UPDATE] = "true"
     binary = real_binary()
     relay: subprocess.Popen[str] | None = None
-    upstream = env.get("GOOGLE_GEMINI_BASE_URL")
     if wants_relay(args):
         script = relay_script()
         if script is not None:
             started = start_relay(script)
             if started is not None:
                 relay, port = started
-                env["AGY_CACHE_RELAY"] = f"http://127.0.0.1:{port}"
-                env["CLOUD_CODE_URL"] = env["AGY_CACHE_RELAY"]
-                if upstream and upstream != env["AGY_CACHE_RELAY"]:
-                    env["AGY_GEMINI_UPSTREAM"] = upstream
-                    env["GOOGLE_GEMINI_BASE_URL"] = env["AGY_CACHE_RELAY"]
+                env = relay_environment(env, f"http://127.0.0.1:{port}")
     try:
         return subprocess.run([str(binary), *args], env=env).returncode
     finally:
